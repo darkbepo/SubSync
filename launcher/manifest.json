@@ -1,0 +1,338 @@
+{
+ "python": {
+  "name": "Python 3.12.10",
+  "kind": "python",
+  "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+  "sha256": "",
+  "size": 0,
+  "version": "3.12.10",
+  "fallbacks": [
+   "https://api.nuget.org/v3-flatcontainer/python/3.12.10/python.3.12.10.nupkg"
+  ]
+ },
+ "wheels": [
+  {
+   "name": "faster-whisper 1.2.1",
+   "url": "https://files.pythonhosted.org/packages/05/99/49ee85903dee060d9f08297b4a342e5e0bcfca2f027a07b4ee0a38ab13f9/faster_whisper-1.2.1-py3-none-any.whl",
+   "sha256": "79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7",
+   "size": 1118909,
+   "kind": "wheel"
+  },
+  {
+   "name": "ctranslate2 4.8.5",
+   "url": "https://files.pythonhosted.org/packages/cb/84/6a2f815ca1f6f29c3f176902e4b9ddaf7a105e07a822d7740858f331e417/ctranslate2-4.8.5-cp312-cp312-win_amd64.whl",
+   "sha256": "16b1478f9dccd3c6eedb7a1b2e23cb2a41f03976266b71afa1bd9019df7c7014",
+   "size": 20407486,
+   "kind": "wheel"
+  },
+  {
+   "name": "onnxruntime 1.31.1",
+   "url": "https://files.pythonhosted.org/packages/45/b2/793b4051d8dc6acb379ead9b72050f0ffa283ca49a6904add2e218b83e2e/onnxruntime-1.31.1-cp312-cp312-win_amd64.whl",
+   "sha256": "ae8a9a351efda685cc59a66226cdefaa37a126c1d66872ca23a2de9425326130",
+   "size": 14888466,
+   "kind": "wheel"
+  },
+  {
+   "name": "tokenizers 0.23.3",
+   "url": "https://files.pythonhosted.org/packages/d1/6c/24f074c9a0efb98e61b20aafe6b2641922d5db24e447d5d6daffd9e17555/tokenizers-0.23.3-cp310-abi3-win_amd64.whl",
+   "sha256": "1f0823bb00c5fdc98e487354d54dd55a03848d61a1a0bf29a68c77f24f3b26c3",
+   "size": 2872101,
+   "kind": "wheel"
+  },
+  {
+   "name": "huggingface_hub 2.4.0",
+   "url": "https://files.pythonhosted.org/packages/d4/55/ff47f1b082ecf5f43f4bc1e3b932d68eead171dabbbd1a92666c686301d7/huggingface_hub-2.4.0-py3-none-any.whl",
+   "sha256": "42ecfd93ede47bdd333daebbf66a32d7bfe2e18752754fe4d2d4f98a0179d801",
+   "size": 857021,
+   "kind": "wheel"
+  },
+  {
+   "name": "click 8.5.1",
+   "url": "https://files.pythonhosted.org/packages/31/7d/164b7ffc8624fe9efb4221bf9af485d5c1e41b9ae118045d2b6dc5457d8b/click-8.5.1-py3-none-any.whl",
+   "sha256": "8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37",
+   "size": 126163,
+   "kind": "wheel"
+  },
+  {
+   "name": "hf-xet 1.8.0",
+   "url": "https://files.pythonhosted.org/packages/97/4d/2c76a992b370ff77d0b5219275779f8c9a7dabb8ee649deb265dfed84d0f/hf_xet-1.8.0-cp38-abi3-win_amd64.whl",
+   "sha256": "92188598dedc1e1f5609bd718d4db8687a6c89915553912571e2f587892eecec",
+   "size": 3911559,
+   "kind": "wheel"
+  },
+  {
+   "name": "httpx2 2.16.0",
+   "url": "https://files.pythonhosted.org/packages/7b/3d/2e4bc4fd1ef9770871669adb348d612a6e4786b303a23f9935b81c48dd60/httpx2-2.16.0-py3-none-any.whl",
+   "sha256": "fd2c5d7909e8d86fe92d53020c310ca0e4e431b838c207c5754b9bbf0308d49a",
+   "size": 97880,
+   "kind": "wheel"
+  },
+  {
+   "name": "httpcore2 2.16.0",
+   "url": "https://files.pythonhosted.org/packages/af/c2/ce417c397afa5181f0e3c6ff01a4d01639414e1adef08730d97571297151/httpcore2-2.16.0-py3-none-any.whl",
+   "sha256": "5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f",
+   "size": 85070,
+   "kind": "wheel"
+  },
+  {
+   "name": "PyYAML 6.0.3",
+   "url": "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
+   "sha256": "5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b",
+   "size": 154003,
+   "kind": "wheel"
+  },
+  {
+   "name": "PySide6_Essentials 6.12.0",
+   "url": "https://files.pythonhosted.org/packages/03/61/9a7e32a37b224f68506785bfb0f288d516098ec71681782d72b695a6c95d/pyside6_essentials-6.12.0-cp310-abi3-win_amd64.whl",
+   "sha256": "c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42",
+   "size": 82153795,
+   "kind": "wheel"
+  },
+  {
+   "name": "shiboken6 6.12.0",
+   "url": "https://files.pythonhosted.org/packages/2a/b6/bee97e7a2edeab72aafabb46ee5adc939790a638d107860b4cad7a20e407/shiboken6-6.12.0-cp310-abi3-win_amd64.whl",
+   "sha256": "a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e",
+   "size": 1265476,
+   "kind": "wheel"
+  },
+  {
+   "name": "numpy 2.5.4",
+   "url": "https://files.pythonhosted.org/packages/12/33/fefe62073dc8acfd0f2b9ed7c003af2f50aa61555e113e6db02b8f79f145/numpy-2.5.4-cp312-cp312-win_amd64.whl",
+   "sha256": "a7b1b6353e36a7e50de2973a38d705c88ee93adcf120673cee7f45a4a3fa223a",
+   "size": 12573091,
+   "kind": "wheel"
+  },
+  {
+   "name": "RapidFuzz 3.14.6",
+   "url": "https://files.pythonhosted.org/packages/84/c4/12f01df5778227c8655fcd9b429fc001d43270f5d8d154edc9066bab1de3/rapidfuzz-3.14.6-cp312-cp312-win_amd64.whl",
+   "sha256": "cfca36e4612208875e08611a779164b6cb8900ab8bbd3d82d4cfdfae9efbfac9",
+   "size": 1731992,
+   "kind": "wheel"
+  },
+  {
+   "name": "pysubs2 1.9.1",
+   "url": "https://files.pythonhosted.org/packages/fa/8b/a56185534f68857ab90c0f2f7642940e6a249c9e782a258a59c31c743c70/pysubs2-1.9.1-py3-none-any.whl",
+   "sha256": "4210ebedc54e8272e741fc5888a1721f74056bbd91b7aac7cc90b6559cd055b4",
+   "size": 48092,
+   "kind": "wheel"
+  },
+  {
+   "name": "av 19.0.2",
+   "url": "https://files.pythonhosted.org/packages/32/5a/743a83666ded197df8b9957e2800bef9a39d52b23be2ca211bbd14b5fb22/av-19.0.2-cp312-abi3-win_amd64.whl",
+   "sha256": "3ce5a1d7b916d13c16ac58f1756f0fee4af2d53f02bc1403e18550b50d375a22",
+   "size": 28150949,
+   "kind": "wheel"
+  },
+  {
+   "name": "msvc_runtime 14.51.36231",
+   "url": "https://files.pythonhosted.org/packages/98/33/be9ef68901200813fc174a06758b4ae48ca4eb58fa783280dd879d5fd048/msvc_runtime-14.51.36231-cp312-cp312-win_amd64.whl",
+   "sha256": "89f70d1a37bb64164cdb09d02dd82d6b1400e1310be2995b4ed5a9f23efe2222",
+   "size": 2052033,
+   "kind": "wheel"
+  },
+  {
+   "name": "anyio 4.16.0",
+   "url": "https://files.pythonhosted.org/packages/a9/16/7757fb84c819accc7d7e9af5291b261e4abb8627ee040f99e7d35ef2457a/anyio-4.16.0-py3-none-any.whl",
+   "sha256": "c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026",
+   "size": 134521,
+   "kind": "wheel"
+  },
+  {
+   "name": "filelock 4.2.9",
+   "url": "https://files.pythonhosted.org/packages/00/05/76184fe08339723d643ab47887a8e4de8f2921ca4e008617ab7490af7857/filelock-4.2.9-py3-none-any.whl",
+   "sha256": "a379c50a729e5b68c8519a4d26489f755d9769960a236ecd838190e2a78db2e9",
+   "size": 164734,
+   "kind": "wheel"
+  },
+  {
+   "name": "fsspec 2026.9.0",
+   "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
+   "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f",
+   "size": 221738,
+   "kind": "wheel"
+  },
+  {
+   "name": "h11 0.16.0",
+   "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+   "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+   "size": 37515,
+   "kind": "wheel"
+  },
+  {
+   "name": "idna 3.20",
+   "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+   "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+   "size": 69583,
+   "kind": "wheel"
+  },
+  {
+   "name": "packaging 26.3",
+   "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+   "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+   "size": 129956,
+   "kind": "wheel"
+  },
+  {
+   "name": "protobuf 7.36.2",
+   "url": "https://files.pythonhosted.org/packages/8a/55/b77bda4e5e5f5971fb51b07663694690e9afdb9402136c16a522bd621cad/protobuf-7.36.2-cp310-abi3-win_amd64.whl",
+   "sha256": "a300819d441e078a5608c0d3c709796bb548136058fda017ae51d425b44fd353",
+   "size": 456514,
+   "kind": "wheel"
+  },
+  {
+   "name": "tqdm 4.70.1",
+   "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
+   "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+   "size": 80199,
+   "kind": "wheel"
+  },
+  {
+   "name": "truststore 0.10.5",
+   "url": "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl",
+   "sha256": "9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c",
+   "size": 19017,
+   "kind": "wheel"
+  },
+  {
+   "name": "typing_extensions 4.16.0",
+   "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+   "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+   "size": 45571,
+   "kind": "wheel"
+  },
+  {
+   "name": "flatbuffers 25.12.19",
+   "url": "https://files.pythonhosted.org/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl",
+   "sha256": "7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4",
+   "size": 26661,
+   "kind": "wheel"
+  }
+ ],
+ "cuda": [
+  {
+   "name": "nvidia-cudnn-cu12 9.10.2.21",
+   "url": "https://files.pythonhosted.org/packages/3d/90/0bd6e586701b3a890fd38aa71c387dab4883d619d6e5ad912ccbd05bfd67/nvidia_cudnn_cu12-9.10.2.21-py3-none-win_amd64.whl",
+   "sha256": "c6288de7d63e6cf62988f0923f96dc339cea362decb1bf5b3141883392a7d65e",
+   "size": 692992268,
+   "kind": "cuda",
+   "files": [
+    {
+     "name": "cudnn64_9.dll",
+     "size": 266288
+    },
+    {
+     "name": "cudnn_adv64_9.dll",
+     "size": 282445872
+    },
+    {
+     "name": "cudnn_cnn64_9.dll",
+     "size": 4618272
+    },
+    {
+     "name": "cudnn_engines_precompiled64_9.dll",
+     "size": 513926688
+    },
+    {
+     "name": "cudnn_engines_runtime_compiled64_9.dll",
+     "size": 20201008
+    },
+    {
+     "name": "cudnn_graph64_9.dll",
+     "size": 2420256
+    },
+    {
+     "name": "cudnn_heuristic64_9.dll",
+     "size": 56823328
+    },
+    {
+     "name": "cudnn_ops64_9.dll",
+     "size": 126508576
+    }
+   ]
+  },
+  {
+   "name": "nvidia-cublas-cu12 12.9.2.10",
+   "url": "https://files.pythonhosted.org/packages/20/e2/fc9a0e985249d873150276d5afb02e39a66817fedbf1a385724393e505ed/nvidia_cublas_cu12-12.9.2.10-py3-none-win_amd64.whl",
+   "sha256": "623f43027d40d44ceadf0043f002bd25cf353e8f13ce90b9a87057019f560661",
+   "size": 553162896,
+   "kind": "cuda",
+   "files": [
+    {
+     "name": "cublas64_12.dll",
+     "size": 102518272
+    },
+    {
+     "name": "cublasLt64_12.dll",
+     "size": 668673536
+    }
+   ]
+  },
+  {
+   "name": "nvidia-cuda-nvrtc-cu12 12.9.86",
+   "url": "https://files.pythonhosted.org/packages/52/de/823919be3b9d0ccbf1f784035423c5f18f4267fb0123558d58b813c6ec86/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-win_amd64.whl",
+   "sha256": "72972ebdcf504d69462d3bcd67e7b81edd25d0fb85a2c46d3ea3517666636349",
+   "size": 76408187,
+   "kind": "cuda",
+   "files": [
+    {
+     "name": "nvrtc-builtins64_129.dll",
+     "size": 7217664
+    },
+    {
+     "name": "nvrtc64_120_0.dll",
+     "size": 89832960
+    }
+   ]
+  }
+ ],
+ "models": [
+  {
+   "name": "speech recognition model",
+   "kind": "hf",
+   "dest": "models/whisper-large-v3-turbo",
+   "candidates": [
+    {
+     "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+     "files": [
+      "config.json",
+      "preprocessor_config.json",
+      "model.bin",
+      "tokenizer.json",
+      "vocabulary.*"
+     ]
+    },
+    {
+     "repo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+     "files": [
+      "config.json",
+      "preprocessor_config.json",
+      "model.bin",
+      "tokenizer.json",
+      "vocabulary.*"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "matching model",
+   "kind": "hf",
+   "dest": "models/minilm",
+   "candidates": [
+    {
+     "repo": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+     "files": [
+      "onnx/model_quint8_avx2.onnx=model.onnx",
+      "tokenizer.json"
+     ]
+    },
+    {
+     "repo": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+     "files": [
+      "onnx/model_quantized.onnx=model.onnx",
+      "tokenizer.json"
+     ]
+    }
+   ]
+  }
+ ]
+}
