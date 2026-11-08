@@ -74,7 +74,7 @@ Everything happens on your PC. The only internet access is the one-time setup do
 
 ## Updating
 
-Replace `SubSync.exe` (and `subsync-cli.exe`) with the new version and start it. **Don't delete anything.** It downloads only what changed, if anything.
+Replace `SubSync.exe` (and `subsync-cli.exe`) with the new version and start it. **No need to delete the other files and folders.** It downloads only what changed, if anything.
 
 ## Missing or damaged files repair themselves
 
