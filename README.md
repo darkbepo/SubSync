@@ -78,7 +78,7 @@ Replace `SubSync.exe` (and `subsync-cli.exe`) with the new version and start it.
 
 ## Missing or damaged files repair themselves
 
-Every time SubSync starts it checks that all of its files are present and intact (this takes well under a second). If something was deleted or damaged, for example a model file or a library, the setup window appears as **"Repairing SubSync"** and downloads **only that piece** again. You never need to delete anything to "start fresh".
+Every time SubSync starts it checks that all of its files are present and intact (this takes well under a second). If something was deleted or damaged, for example a model file or a library, the setup window appears as **"Repairing SubSync"** and downloads **only that piece** again. 
 
 The downloads have **backup sources**. If a link stops working (python.org, the Python package site, or the AI model site), SubSync automatically tries official mirrors and backup copies. Every file is checked against a known fingerprint, so a backup source can't give you a wrong or tampered file. The AI models are locked to the exact version that was first installed.
 
