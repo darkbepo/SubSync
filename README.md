@@ -4,7 +4,7 @@ SubSync fixes English subtitles that are out of sync with a video, **line by lin
 
 It works in bulk: drop in a whole season and walk away.
 
-**[⬇ Download the latest version](https://github.com/darkbepo/SubSync/releases/latest)** (`SubSync-…-windows-x64.zip`)
+**[⬇ Download the latest version](https://github.com/darkbepo/SubSync/releases/latest)**
 
 ---
 
