@@ -155,9 +155,53 @@ class ReshapeTests(unittest.TestCase):
         cues = [Line(1, 4, "All right. Put out\nan amber alert, (Sighs) and a b.O.L.O."), Line(4, 6, "(Door closes)"),
                 Line(6, 9, "- Yes.\n- <i>No, i won't.</i>")]
         new, _, _ = run(cues)
-        before = [t.text for t in W.tokenize(cues) if t.kind in ("word", "sound", "label")]
-        after = [t.text for t in W.tokenize(new) if t.kind in ("word", "sound", "label")]
+        before = [t.text.lower() for t in W.tokenize(cues) if t.kind in ("word", "sound", "label")]
+        after = [t.text.lower() for t in W.tokenize(new) if t.kind in ("word", "sound", "label")]
         self.assertEqual(before, after)
+
+
+def cased(cues, spec):
+    toks, words = timed(cues, spec)
+    _, match = W.match_words(toks, words, cues)
+    n = R.fix_case(toks, words, match)
+    return " ".join(t.text for t in toks if t.kind == "word"), n
+
+
+class CaseTests(unittest.TestCase):
+    def test_case_i(self):
+        text, _ = cased([Line(1, 3, "Well, i know i'm late.")], "Well,@1.0 I@1.3 know@1.5 I'm@1.8 late.@2.1")
+        self.assertEqual(text, "Well, I know I'm late.")
+
+    def test_case_names_from_whisper(self):
+        text, _ = cased([Line(1, 4, "Hey, agent van pelt is in afghanistan.")],
+                        "Hey,@1.0 agent@1.3 Van@1.6 Pelt@1.9 is@2.2 in@2.4 Afghanistan.@2.6")
+        self.assertEqual(text, "Hey, agent Van Pelt is in Afghanistan.")
+
+    def test_case_sentence_start(self):
+        text, _ = cased([Line(1, 3, "Done. yeah, sure.")], "Done.@1.0 yeah,@1.5 sure.@1.9")
+        self.assertEqual(text, "Done. Yeah, sure.")
+
+    def test_case_abbrev(self):
+        text, _ = cased([Line(1, 4, "Put out a b.O.L.O. And call c.H.P.")],
+                        "Put@1.0 out@1.2 a@1.4 BOLO.@1.6 And@2.2 call@2.4 CHP.@2.7")
+        self.assertEqual(text, "Put out a B.O.L.O. And call C.H.P.")
+
+    def test_case_sentence_initial_whisper_ignored(self):
+        text, _ = cased([Line(1, 3, "I guess well enough.")], "I@1.0 guess.@1.2 Well@1.6 enough.@1.9")
+        self.assertEqual(text, "I guess well enough.")
+
+    def test_case_never_lowers(self):
+        text, _ = cased([Line(1, 2, "NO WAY!")], "No@1.0 way!@1.3")
+        self.assertEqual(text, "NO WAY!")
+
+    def test_case_returns_count(self):
+        _, n = cased([Line(1, 3, "Well, i know i'm late.")], "Well,@1.0 I@1.3 know@1.5 I'm@1.8 late.@2.1")
+        self.assertEqual(n, 2)
+
+    def test_reshape_fixes_case(self):
+        new, _, st = run([Line(1, 3, "Well, i know.")], "Well,@1.0 I@1.3 know.@1.6")
+        self.assertEqual(new[0].text, "Well, I know.")
+        self.assertEqual(st["capitals_fixed"], 1)
 
 
 if __name__ == "__main__":

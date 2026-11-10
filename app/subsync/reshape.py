@@ -166,6 +166,74 @@ def split_long(sent: list[Tok]) -> list[list[Tok]]:
     return split_long(sent[:i]) + split_long(sent[i:])
 
 
+_I_FORMS = {"i", "i'm", "i've", "i'll", "i'd"}
+_DOTTED = re.compile(r"(?:[a-zA-Z]\.){2,}")
+
+
+def _upper_at(text: str, letter_positions: set[int]) -> str:
+    """Upper-case the n-th letters (counting letters only, inside text without tags)."""
+    out, n, in_tag = [], 0, False
+    for ch in text:
+        if ch in "<{":
+            in_tag = True
+        if not in_tag and ch.isalpha():
+            out.append(ch.upper() if n in letter_positions else ch)
+            n += 1
+        else:
+            out.append(ch)
+        if ch in ">}":
+            in_tag = False
+    return "".join(out)
+
+
+def fix_case(toks: list[Tok], words, match: dict[int, int]) -> int:
+    """Repair letter case (never lowers a letter, never changes a word). Returns tokens changed."""
+    from .words import norm
+
+    wtexts = [w[2].strip() for w in words]
+
+    def whisper_initial(j):
+        return j == 0 or bool(_END.search(wtexts[j - 1]))
+
+    def set_text(t, new):
+        assert new.lower() == t.text.lower()
+        if new != t.text:
+            t.text = new
+            return True
+        return False
+
+    touched = set()
+    for i, t in enumerate(toks):
+        if t.kind != "word":
+            continue
+        bare = _bare(t).lower().strip(".,;:!?\"'()-–—…")
+        new = t.text
+        if bare in _I_FORMS:
+            new = _upper_at(new, {0})
+        if _DOTTED.fullmatch(re.sub(r"[^a-zA-Z.]", "", _bare(t))):
+            letters = sum(ch.isalpha() for ch in _bare(t))
+            new = _upper_at(new, set(range(letters)))
+        j = match.get(i)
+        if j is not None and not whisper_initial(j):
+            wl = [ch for ch in wtexts[j] if ch.isalpha()]
+            if wl and norm(wtexts[j]) == t.norm:
+                new = _upper_at(new, {p for p, ch in enumerate(wl) if ch.isupper()})
+            elif wl and wl[0].isupper():
+                new = _upper_at(new, {0})
+        if set_text(t, new):
+            touched.add(i)
+    # first word of every sentence
+    prev = None
+    word_idx = [i for i, t in enumerate(toks) if t.kind == "word"]
+    for i in word_idx:
+        t = toks[i]
+        if prev is None or _ends_sentence(prev, t):
+            if set_text(t, _upper_at(t.text, {0})):
+                touched.add(i)
+        prev = t
+    return len(touched)
+
+
 _OPEN = re.compile(r"<\s*([a-zA-Z]+)[^>]*>")
 _CLOSE = re.compile(r"<\s*/\s*([a-zA-Z]+)\s*>")
 
@@ -224,6 +292,7 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
     for t in toks:
         if t.kind == "tag" and t.text.startswith("{") and t.cue in has_words:
             pos_tags.setdefault(t.cue, []).append(t)
+    capitals = fix_case(toks, words, match)  # match keys are indexes into toks
     stream = [t for t in toks if t.cue in has_words and not (t.kind == "tag" and t.text.startswith("{"))]
     # a sound description that ends its original cue belongs to the sentence before it
     last_real = {}
@@ -326,7 +395,7 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
         for c in f:
             seen[c] = seen.get(c, 0) + 1
     split = sum(1 for c, n in seen.items() if n > 1)
-    return new, speech_end, {"joined": joined, "split": split, "from_cues": from_cues}
+    return new, speech_end, {"joined": joined, "split": split, "capitals_fixed": capitals, "from_cues": from_cues}
 
 
 def wrap(toks: list[Tok]) -> str:
