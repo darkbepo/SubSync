@@ -119,6 +119,10 @@ def _expected(toks: list[Tok], rough: list[Line]) -> list[float]:
     return exp
 
 
+NEAR_WEIGHT = 0.03  # score lost per second of distance from the rough position (max 0.12 in the band)
+SEC_PER_CHAR = 0.065  # typical speaking pace, for placing words Whisper misheard
+
+
 class _MaxTree:
     """Fenwick tree for prefix maxima of (value, key)."""
 
@@ -174,6 +178,8 @@ def match_words(toks: list[Tok], words: list[tuple[float, float, str]], rough: l
                 s = fuzz.ratio(t.norm, wn) / 100.0
                 if s < 0.8:
                     continue
+            # a small time prior: of two equally good matchings, take the one nearer the rough position
+            s -= NEAR_WEIGHT * abs(wstart[j] - exp[i])
             prev = tree.query(j)
             found.append((j, prev[0] + s, prev[1]))
         for j, v, prev in found:  # update after scoring: one token never matches two words
@@ -187,23 +193,34 @@ def match_words(toks: list[Tok], words: list[tuple[float, float, str]], rough: l
     for i, j in match.items():
         t = toks[i]
         t.start, t.end, t.matched = words[j][0], words[j][1], True
-    # unmatched words: shift by the interpolated (measured - expected) of their matched neighbours
-    pos = [i for i in word_idx]
-    m_pos = [k for k, i in enumerate(pos) if i in match]
-    for k, i in enumerate(pos):
-        if i in match:
-            continue
-        a = bisect.bisect_left(m_pos, k) - 1
-        b = a + 1
-        da = (toks[pos[m_pos[a]]].start - exp[pos[m_pos[a]]]) if a >= 0 else 0.0
-        db = (toks[pos[m_pos[b]]].start - exp[pos[m_pos[b]]]) if b < len(m_pos) else 0.0
-        if a >= 0 and b < len(m_pos):
-            f = (k - m_pos[a]) / (m_pos[b] - m_pos[a])
-            d = da + f * (db - da)
-        else:
-            d = 0.0
-        d = max(-band, min(band, d))
-        toks[i].start = exp[i] + d
+    # unmatched words: placed from the matched words of their own cue, by character count
+    # (never from a neighbouring cue, whose rough position may be off by seconds)
+    pos = word_idx
+    cues: dict[int, list[int]] = {}
+    for i in pos:
+        cues.setdefault(toks[i].cue, []).append(i)
+    for idx in cues.values():
+        offs, o = [], 0
+        for i in idx:
+            offs.append(o)
+            o += len(toks[i].text) + 1
+        anchors = [q for q, i in enumerate(idx) if i in match]
+        for q, i in enumerate(idx):
+            if i in match:
+                continue
+            k = bisect.bisect_left(anchors, q)
+            left = anchors[k - 1] if k > 0 else None
+            right = anchors[k] if k < len(anchors) else None
+            if left is not None and right is not None:
+                ls, rs = toks[idx[left]].start, toks[idx[right]].start
+                t = ls + (rs - ls) * (offs[q] - offs[left]) / (offs[right] - offs[left])
+            elif right is not None:
+                t = toks[idx[right]].start - (offs[right] - offs[q]) * SEC_PER_CHAR
+            elif left is not None:
+                t = toks[idx[left]].start + (offs[q] - offs[left]) * SEC_PER_CHAR
+            else:
+                t = exp[i]
+            toks[i].start = max(exp[i] - band, min(exp[i] + band, t))
     # keep word times strictly increasing; unmatched words never jump over a neighbour
     next_matched: list[float | None] = [None] * len(pos)
     nxt = None

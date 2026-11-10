@@ -67,6 +67,37 @@ class MatchTests(unittest.TestCase):
         W.match_words(toks, words, cues)
         self.assertEqual(_wtoks(toks)[0].start, 551.9)
 
+    def test_tie_prefers_word_near_expected_time(self):
+        # cue 1's first word was misheard, so its "you" could pair with cue 0's trailing "you"
+        # or with its own; both give the same number of matches - the one near the cue must win
+        cues = [Line(10.0, 11.0, "thank you"), Line(12.0, 13.0, "you know")]
+        words = _words("thank@10.0 you@10.4 yuu@12.0 know@12.4")
+        toks = W.tokenize(cues)
+        W.match_words(toks, words, cues)
+        w = _wtoks(toks)
+        self.assertEqual(w[1].start, 10.4)   # cue 0's "you"
+        self.assertNotEqual(w[2].start, 10.4)
+        self.assertGreater(w[2].start, 11.0)
+
+    def test_tie_prefers_word_near_expected_time_reverse(self):
+        cues = [Line(10.0, 11.0, "thank you"), Line(12.0, 13.0, "you know")]
+        words = _words("thank@10.0 yuu@10.4 you@12.0 know@12.4")
+        toks = W.tokenize(cues)
+        W.match_words(toks, words, cues)
+        w = _wtoks(toks)
+        self.assertEqual(w[2].start, 12.0)   # cue 1's own "you"
+        self.assertLess(w[1].start, 11.5)
+
+    def test_misheard_first_word_placed_before_its_own_next_word(self):
+        # the previous cue's rough position is 2 s late; that error must not leak into "Nice"
+        cues = [Line(110.9, 114.4, "The case is closed."), Line(113.2, 114.2, "Nice work.")]
+        words = _words("The@108.9 case@109.2 is@109.6 closed.@112.06 Mice@113.09 work.@113.58")
+        toks = W.tokenize(cues)
+        W.match_words(toks, words, cues)
+        nice = _wtoks(toks)[4]
+        self.assertFalse(nice.matched)
+        self.assertLess(abs(nice.start - 113.09), 0.35)
+
     def test_fuzzy_misspelling(self):
         cues = [Line(10, 12, "Mr. degeorge likes colour")]
         words = _words("Mr.@10.0 DeGeorge,@10.3 likes@10.7 color@11.0")
@@ -171,6 +202,44 @@ class RefineTests(unittest.TestCase):
         self.assertEqual((new[1].start, new[1].end), (4.0, 6.0))
         self.assertNotIn(1, speech_end)
         self.assertEqual(n, 2)
+
+
+class ProcessTests(unittest.TestCase):
+    def test_process_timing_only(self):
+        import numpy as np
+        import sim
+        from subsync import pipeline
+
+        bad, truth, asr, foreign = sim.make(seed=1)
+        p = pipeline.process(bad, asr, "en", sim.fake_embed(foreign), tidy=False)
+        self.assertTrue(p.res.ok, p.res.reason)
+        self.assertEqual(len(p.lines), len(bad))
+        err = np.abs(np.array([l.start for l in p.lines]) - np.array(truth))
+        self.assertGreaterEqual(float(np.mean(err < 0.3)), 0.95)
+        self.assertEqual(p.stats["subtitles_before"], len(bad))
+        self.assertEqual(p.stats["subtitles_after"], len(bad))
+        self.assertGreater(p.stats["word_timed"], 0.5 * len(bad))
+        self.assertEqual(len(p.details), len(p.lines))
+        self.assertEqual(set(p.details[0]), {"n", "from_cues", "orig_start", "start", "end", "words", "matched", "changes"})
+
+    def test_details_write_and_prune(self):
+        import tempfile
+        from subsync import details, paths
+
+        with tempfile.TemporaryDirectory() as d:
+            old = paths.LOGS
+            paths.LOGS = d
+            try:
+                row = {"n": 1, "from_cues": [1], "orig_start": 1.0, "start": 0.5, "end": 2.0, "words": 3,
+                       "matched": 3, "changes": ["start from words"]}
+                for k in range(205):
+                    details.write(os.path.join(d, f"Show.S01E{k:03d}.mkv"), [row])
+                files = os.listdir(os.path.join(d, "details"))
+                self.assertEqual(len(files), 200)
+                text = open(os.path.join(d, "details", "Show.S01E204.tsv"), encoding="utf-8").read()
+                self.assertIn("start from words", text)
+            finally:
+                paths.LOGS = old
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ import queue
 import threading
 import time
 import traceback
+from dataclasses import dataclass, field
 
 from . import paths
 
@@ -34,6 +35,55 @@ def output_path(video: str, suffix: str, overwrite: bool) -> str:
     while os.path.exists(os.path.join(folder, f"{stem}{suffix}.#{n}.srt")):
         n += 1
     return os.path.join(folder, f"{stem}{suffix}.#{n}.srt")
+
+
+@dataclass
+class Processed:
+    res: object                 # align.Result (rough placement; .ok / .reason as before)
+    lines: list                 # what gets written
+    stats: dict = field(default_factory=dict)
+    details: list = field(default_factory=list)
+
+
+def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> Processed:
+    """Rough alignment, then (English audio) word-accurate timing."""
+    from . import words as W
+    from .align import align
+
+    res = align(lines, words, lang, embed, "en", progress=progress)
+    stats = {"tidy": bool(tidy), "word_timed": 0, "subtitles_before": len(lines), "subtitles_after": len(lines),
+             "joined": 0, "split": 0, "capitals_fixed": 0}
+    if not res.ok:
+        return Processed(res, lines, stats, [])
+    out = res.lines
+    counts: dict = {}
+    if (lang or "").split("-")[0] == "en":
+        toks = W.tokenize(lines)
+        W.match_words(toks, words, res.lines)
+        out, _, stats["word_timed"] = W.refine(lines, res.lines, toks)
+        counts = _count_words(toks)
+    det = []
+    for k, (o, n) in enumerate(zip(lines, out)):
+        total, matched = counts.get(k, (0, 0))
+        changes = []
+        if abs(n.start - res.lines[k].start) > 0.005:
+            changes.append("start from words")
+        if abs(n.start - o.start) > 0.005:
+            changes.append(f"start {n.start - o.start:+.2f}")
+        if abs((n.end - n.start) - (o.end - o.start)) > 0.005:
+            changes.append(f"length {(n.end - n.start) - (o.end - o.start):+.2f}")
+        det.append({"n": k + 1, "from_cues": [k + 1], "orig_start": o.start, "start": n.start, "end": n.end,
+                    "words": total, "matched": matched, "changes": changes})
+    return Processed(res, out, stats, det)
+
+
+def _count_words(toks) -> dict:
+    out: dict = {}
+    for t in toks:
+        if t.kind == "word":
+            a, b = out.get(t.cue, (0, 0))
+            out[t.cue] = (a + 1, b + (1 if t.matched else 0))
+    return out
 
 
 def _cache_file(video: str, audio_n: int) -> str:
@@ -251,20 +301,25 @@ class Engine:
                     from .embed import Embedder
 
                     self._embedder = Embedder(paths.MINILM_DIR)
-                from . import subtitles
-                from .align import align
+                from . import details, subtitles
 
                 lines = subtitles.load(job["sub"])
                 t0 = time.time()
-                res = align(lines, words, lang, self._embedder, "en",
+                s = self.get_settings()
+                p = process(lines, words, lang, self._embedder, bool(s.get("tidy", True)),
                             progress=lambda f: self.emit(jid, "progress", f))
+                res = p.res
                 if not res.ok:
                     self.emit(jid, "warning", {"text": res.reason, "lang": lang})
                     continue
-                s = self.get_settings()
                 out = output_path(job["video"], s.get("suffix", ".en"), bool(s.get("overwrite", False)))
-                self._write(jid, out, subtitles.to_srt(res.lines))
+                self._write(jid, out, subtitles.to_srt(p.lines))
+                try:
+                    details.write(job["video"], p.details)
+                except OSError:
+                    pass
                 self.emit(jid, "done", {
+                    "tidy": p.stats,
                     "out": out, "matched": res.matched, "total": res.total_speech, "lang": lang,
                     "ends": (res.ends_speech, res.ends_read, res.ends_limited),
                     "runs": res.runs, "offsets": (min(res.offsets), max(res.offsets)) if res.offsets else (0, 0),
