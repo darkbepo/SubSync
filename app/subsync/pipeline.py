@@ -46,7 +46,9 @@ class Processed:
 
 
 def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> Processed:
-    """Rough alignment, then (English audio) word-accurate timing."""
+    """Rough alignment; then, for English audio, word-accurate timing and (tidy) re-cutting;
+    for other audio, (tidy) only cues taller than two rows are split."""
+    from . import reshape as R
     from . import words as W
     from .align import align
 
@@ -55,25 +57,56 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> P
              "joined": 0, "split": 0, "capitals_fixed": 0}
     if not res.ok:
         return Processed(res, lines, stats, [])
-    out = res.lines
+    english = (lang or "").split("-")[0] == "en"
     counts: dict = {}
-    if (lang or "").split("-")[0] == "en":
+    timed: set = set()
+    if english:
         toks = W.tokenize(lines)
-        W.match_words(toks, words, res.lines)
-        out, _, stats["word_timed"] = W.refine(lines, res.lines, toks)
+        _, match = W.match_words(toks, words, res.lines)
         counts = _count_words(toks)
+        if tidy:
+            out, speech_end, st = R.reshape(lines, res.lines, toks, words, match)
+            sources = st.pop("from_cues")
+            stats.update(st)
+            timed = set(speech_end)
+        else:
+            out, _, stats["word_timed"] = W.refine(lines, res.lines, toks)
+            sources = [[k] for k in range(len(lines))]
+            timed = {k for k in range(len(out)) if abs(out[k].start - res.lines[k].start) > 0.005}
+    elif tidy:
+        out, stats["split"] = R.split_tall(res.lines)
+        sources = []
+        for k, l in enumerate(res.lines):
+            sources += [[k]] * max(1, (len(l.text.split("\n")) + 1) // 2)
+    else:
+        out, sources = res.lines, [[k] for k in range(len(lines))]
+    if english and tidy:
+        stats["word_timed"] = len(timed)
+    stats["subtitles_after"] = len(out)
+    used: dict = {}
+    for src in sources:
+        for c in src:
+            used[c] = used.get(c, 0) + 1
     det = []
-    for k, (o, n) in enumerate(zip(lines, out)):
-        total, matched = counts.get(k, (0, 0))
+    for k, (n, src) in enumerate(zip(out, sources)):
+        o = lines[src[0]]
+        total = sum(counts.get(c, (0, 0))[0] for c in src)
+        matched = sum(counts.get(c, (0, 0))[1] for c in src)
         changes = []
-        if abs(n.start - res.lines[k].start) > 0.005:
+        if len(src) > 1:
+            changes.append("joined " + "+".join(str(c + 1) for c in src))
+        elif used.get(src[0], 0) > 1:
+            changes.append(f"split from {src[0] + 1}")
+        if k in timed:
             changes.append("start from words")
         if abs(n.start - o.start) > 0.005:
             changes.append(f"start {n.start - o.start:+.2f}")
-        if abs((n.end - n.start) - (o.end - o.start)) > 0.005:
+        if len(src) == 1 and used.get(src[0], 0) == 1 and abs((n.end - n.start) - (o.end - o.start)) > 0.005:
             changes.append(f"length {(n.end - n.start) - (o.end - o.start):+.2f}")
-        det.append({"n": k + 1, "from_cues": [k + 1], "orig_start": o.start, "start": n.start, "end": n.end,
-                    "words": total, "matched": matched, "changes": changes})
+        if n.text != o.text and len(src) == 1 and used.get(src[0], 0) == 1:
+            changes.append("text re-wrapped or capitals fixed")
+        det.append({"n": k + 1, "from_cues": [c + 1 for c in src], "orig_start": o.start, "start": n.start,
+                    "end": n.end, "words": total, "matched": matched, "changes": changes})
     return Processed(res, out, stats, det)
 
 

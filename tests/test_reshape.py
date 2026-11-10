@@ -63,6 +63,13 @@ class SentenceTests(unittest.TestCase):
             self.assertLessEqual(len(rows), 2)
             self.assertTrue(all(len(r) <= 42 for r in rows), rows)
 
+    def test_split_long_when_rows_cannot_fit(self):
+        # 83 visible characters (under 2 x 42) but no break gives two rows of <= 42
+        s = "Degeorge called the police last year, claimed that Trina's Aunt jodie attacked him."
+        toks, _ = timed([Line(10, 15, s)])
+        for p in R.split_long(R.sentences(toks)[0]):
+            self.assertTrue(all(len(r) <= 42 for r in R.wrap(p).split("\n")), R.wrap(p))
+
     def test_split_long_by_duration(self):
         toks, _ = timed([Line(10, 19, "Wait. Just wait for me here")])
         sents = R.sentences(toks)
@@ -106,6 +113,21 @@ class ReshapeTests(unittest.TestCase):
         new, _, _ = run([Line(10.0, 10.9, "Thanks."), Line(11.0, 12.0, "You're welcome.")],
                         "Thanks.@10.0 You're@11.0 welcome.@11.3")
         self.assertEqual([l.text for l in new], ["- Thanks.\n- You're welcome."])
+
+    def test_pause_on_same_row_not_dashed(self):
+        # one speaker pausing: both sentences were on one caption row, so no dashes
+        new, _, _ = run([Line(539.0, 542.0, "Hmm. Let me see.")], "Hmm.@539.28 Let@540.48 me@540.72 see.@540.86")
+        self.assertEqual([l.text for l in new], ["Hmm. Let me see."])
+
+    def test_wrap_after_leading_sound(self):
+        toks, _ = timed([Line(1, 4, "(Police radio chatter)\nIt's all right, Trina.")])
+        self.assertEqual(R.wrap(toks), "(Police radio chatter)\nIt's all right, Trina.")
+
+    def test_dashed_rows_fit_with_dash(self):
+        new, _, _ = run([Line(10.0, 10.4, "Yeah."), Line(11.0, 13.5, "Well, that's gonna be a cool scar, though.")],
+                        "Yeah.@10.0 Well,@11.0 that's@11.3 gonna@11.6 be@11.9 a@12.0 cool@12.2 scar,@12.5 though.@12.9")
+        for l in new:
+            self.assertTrue(all(len(r) <= 42 for r in l.text.split("\n")), l.text)
 
     def test_short_same_speaker_joined(self):
         new, _, _ = run([Line(10.0, 10.4, "Okay."), Line(10.4, 11.5, "Let's go.")], "Okay.@10.0 Let's@10.4 go.@10.7")

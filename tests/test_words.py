@@ -222,6 +222,56 @@ class ProcessTests(unittest.TestCase):
         self.assertEqual(len(p.details), len(p.lines))
         self.assertEqual(set(p.details[0]), {"n", "from_cues", "orig_start", "start", "end", "words", "matched", "changes"})
 
+    def _tall(self, lines):
+        """Make every 7th cue 3-4 rows tall and give the rest sentence punctuation."""
+        out = []
+        for k, l in enumerate(lines):
+            ws = l.text.replace("\n", " ").split()
+            if k % 7 == 0 and len(ws) >= 4:
+                q = max(1, len(ws) // 4)
+                text = "\n".join(" ".join(ws[a:a + q]) for a in range(0, len(ws), q))
+            else:
+                text = l.text
+            out.append(Line(l.start, l.end, text))
+        return out
+
+    def test_process_tidy_on(self):
+        import collections
+        import sim
+        from subsync import pipeline
+
+        bad, truth, asr, foreign = sim.make(seed=2)
+        bad = self._tall(bad)
+        p = pipeline.process(bad, asr, "en", sim.fake_embed(foreign), tidy=True)
+        self.assertTrue(p.res.ok)
+        for l in p.lines:
+            rows = l.text.split("\n")
+            self.assertLessEqual(len(rows), 2, l.text)
+            self.assertTrue(all(len(r) <= 42 for r in rows), l.text)
+        for a, b in zip(p.lines, p.lines[1:]):
+            self.assertLessEqual(a.end, b.start + 1e-6)
+        self.assertNotEqual(p.stats["subtitles_after"], p.stats["subtitles_before"])
+        self.assertEqual(p.stats["subtitles_after"], len(p.lines))
+        words_of = lambda ls: collections.Counter(t.norm for t in W.tokenize(ls) if t.kind == "word")
+        self.assertEqual(words_of(p.lines), words_of(bad))
+        self.assertEqual(len(p.details), len(p.lines))
+        self.assertNotIn("from_cues", p.stats)
+
+    def test_process_tidy_foreign(self):
+        import sim
+        from subsync import pipeline
+
+        bad, truth, asr, foreign = sim.make(seed=2, cross=True)
+        bad = self._tall(bad)
+        p = pipeline.process(bad, asr, "da", sim.fake_embed(foreign), tidy=True)
+        self.assertTrue(p.res.ok)
+        self.assertTrue(all(len(l.text.split("\n")) <= 2 for l in p.lines))
+        out = {(l.start, l.end, l.text) for l in p.lines}
+        for l in p.res.lines:
+            if len(l.text.split("\n")) <= 2:
+                self.assertIn((l.start, l.end, l.text), out)  # unsplit cues keep today's timing
+        self.assertGreater(p.stats["split"], 0)
+
     def test_details_write_and_prune(self):
         import tempfile
         from subsync import details, paths

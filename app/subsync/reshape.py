@@ -105,23 +105,31 @@ def _duration(toks: list[Tok]) -> float:
     return (ws[-1].end or ws[-1].start) - ws[0].start
 
 
+def _can_wrap(toks: list[Tok]) -> bool:
+    """True if the tokens fit one row, or two rows of at most MAX_ROW at some allowed break."""
+    if visible_len(toks) <= MAX_ROW:
+        return True
+    if visible_len(toks) > MAX_CHARS:
+        return False
+    return any(visible_len(toks[:i]) <= MAX_ROW and visible_len(toks[i:]) <= MAX_ROW
+               for i in _boundaries(toks, ("word", "sound", "label")))
+
+
 def _fits(toks: list[Tok]) -> bool:
-    return visible_len(toks) <= MAX_CHARS and _duration(toks) <= MAX_DURATION
+    return _can_wrap(toks) and _duration(toks) <= MAX_DURATION
 
 
-def _boundaries(toks: list[Tok]) -> list[int]:
-    """Indexes where a cut may go (cut before toks[i]): between two words, never inside a
-    glued group, never right after a STOP word."""
-    out = []
-    for i in range(1, len(toks)):
-        t = toks[i]
-        if t.glue:
-            continue
-        prev_words = [x for x in toks[:i] if x.kind == "word"]
-        if not prev_words or not any(x.kind == "word" for x in toks[i:]):
-            continue
-        out.append(i)
-    return out
+def _boundaries(toks: list[Tok], content=("word",)) -> list[int]:
+    """Indexes where a cut may go (cut before toks[i]): with `content` tokens on both sides,
+    never inside a glued group."""
+    is_c = [t.kind in content for t in toks]
+    before = [False] * (len(toks) + 1)
+    for i, c in enumerate(is_c):
+        before[i + 1] = before[i] or c
+    after = [False] * (len(toks) + 1)
+    for i in range(len(toks) - 1, -1, -1):
+        after[i] = after[i + 1] or is_c[i]
+    return [i for i in range(1, len(toks)) if not toks[i].glue and before[i] and after[i]]
 
 
 def _last_word(toks: list[Tok]) -> Tok | None:
@@ -369,20 +377,23 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
         if e - s + SPEECH_TAIL < MIN_DURATION and k + 1 < len(pieces):
             q = pieces[k + 1]
             qs, qe = span(q)
-            if visible_len(p) <= MAX_ROW and visible_len(q) <= MAX_ROW and qe - s <= MAX_DURATION:
-                if qs - e >= 0.5:
-                    cues.append((p + q, (p, q)))
-                    k += 2
-                    continue
-                if visible_len(p + q) <= MAX_CHARS:
+            if qe - s <= MAX_DURATION:
+                # a pause and a new caption row (captioners start one per speaker) = a reply
+                lp, fq = _last_word(p), _first_word(q)
+                new_row = (lp.cue, lp.row) != (fq.cue, fq.row)
+                if qs - e >= 0.5 and new_row:  # one row each, with its "- "
+                    if visible_len(p) + 2 <= MAX_ROW and visible_len(q) + 2 <= MAX_ROW:
+                        cues.append((p + q, (p, q)))
+                        k += 2
+                        continue
+                elif _can_wrap(p + q):  # same speaker, no pause
                     cues.append((p + q, None))
                     k += 2
                     continue
         if e - s + SPEECH_TAIL < MIN_DURATION and cues and cues[-1][1] is None:
             prev = cues[-1][0]
             ps, _ = span(prev)
-            if visible_len(prev) <= MAX_ROW and visible_len(p) <= MAX_ROW and e - ps <= MAX_DURATION \
-                    and s - span(prev)[1] < 0.5:
+            if _can_wrap(prev + p) and e - ps <= MAX_DURATION and s - span(prev)[1] < 0.5:
                 cues[-1] = (prev + p, None)
                 k += 1
                 continue
@@ -439,16 +450,17 @@ def wrap(toks: list[Tok]) -> str:
     if visible_len(toks) <= MAX_ROW:
         return _join(toks)
     best = None
-    for i in _boundaries(toks):
+    for i in _boundaries(toks, ("word", "sound", "label")):
         top, bot = toks[:i], toks[i:]
         a, b = visible_len(top), visible_len(bot)
-        lw = _bare(_last_word(top)).lower().strip(".,;:!?\"'")
+        last = next((t for t in reversed(top) if t.kind != "tag"), None)
+        lw = _bare(last).lower().strip(".,;:!?\"'") if last.kind == "word" else ""
         cost = abs(a - b) + (3 if a > b else 0)
         cost += 1000 * (max(0, a - MAX_ROW) + max(0, b - MAX_ROW))
         if lw in STOP:
             cost += 500
-        if _SOFT.search(_bare(_last_word(top))) or _END.search(_bare(_last_word(top))):
-            cost -= 10
+        if last.kind != "word" or _SOFT.search(_bare(last)) or _END.search(_bare(last)):
+            cost -= 10  # after punctuation or a sound description / speaker label
         prev, nxt = top[-1], bot[0]
         if (prev.cue, prev.row) != (nxt.cue, nxt.row):
             cost -= 7  # the original captioner broke here too
