@@ -24,6 +24,7 @@ class Tok:
     start: float | None = None
     end: float | None = None
     matched: bool = False
+    glue: bool = False  # no space before it in the original row (e.g. "</i>" after a word)
 
 
 _APOS = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "`": "'"})
@@ -62,11 +63,14 @@ def tokenize(lines: list[Line]) -> list[Tok]:
                 out.append(Tok(ci, ri, m.group(0), "label"))
                 pos = m.end()
                 first = False
+            row_start = pos
             while pos < len(row):
+                before = pos
                 while pos < len(row) and row[pos].isspace():
                     pos += 1
                 if pos >= len(row):
                     break
+                glue = pos == before and pos != row_start
                 if first:
                     d = _DASH.match(row, pos)
                     if d:
@@ -92,7 +96,7 @@ def tokenize(lines: list[Line]) -> list[Tok]:
                     else:
                         kind = "word"
                 # (a "word" of only punctuation, like "--" or "...", keeps an empty norm and is never matched)
-                tok = Tok(ci, ri, piece, kind, norm(piece) if kind == "word" else "")
+                tok = Tok(ci, ri, piece, kind, norm(piece) if kind == "word" else "", glue=glue)
                 out.append(tok)
                 if kind != "tag":
                     first = False
