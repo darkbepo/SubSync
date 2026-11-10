@@ -30,10 +30,11 @@ if __name__ == "__main__":
         "nothing to pair":         [W + "/Other.Movie.2019.srt"],
         "missing path":            [W + "/nope.mkv"],
         "bad option":              [W, "--suffix", "de"],
+        "keep layout":             [W, "--keep-layout", "--overwrite", "--report", W + "/r4.json"],
     }
     which = sys.argv[1]
     code = cli.main(cases[which])
     print(f"EXIT {code}")
-    for r in ("r1", "r3"):
+    for r in ("r1", "r3", "r4"):
         if os.path.exists(f"{W}/{r}.json"): print(open(f"{W}/{r}.json").read()[:900])
     os._exit(code)

@@ -110,6 +110,24 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> P
     return Processed(res, out, stats, det)
 
 
+def tidy_summary(stats: dict) -> str:
+    """Short result text, e.g. "808 → 820 subtitles" (empty when the count did not change)."""
+    a, b = stats.get("subtitles_before"), stats.get("subtitles_after")
+    return f"{a} → {b} subtitles" if a is not None and b is not None and a != b else ""
+
+
+def tidy_details(stats: dict) -> str:
+    """Hover/detail lines about word timing and Tidy up lines."""
+    if not stats:
+        return ""
+    lines = [f"Timed from words: {stats.get('word_timed', 0)}"]
+    if not stats.get("tidy"):
+        return "\n".join(lines + ["Tidy up lines: off"])
+    return "\n".join(lines + [f"Subtitles: {stats.get('subtitles_before')} → {stats.get('subtitles_after')}",
+                              f"Joined: {stats.get('joined', 0)}", f"Split: {stats.get('split', 0)}",
+                              f"Capitals fixed: {stats.get('capitals_fixed', 0)}"])
+
+
 def _count_words(toks) -> dict:
     out: dict = {}
     for t in toks:

@@ -485,6 +485,17 @@ class MainWindow(QMainWindow):
         ow_lbl.mousePressEvent = lambda e: self.overwrite.toggle()
         foot.addWidget(self.overwrite)
         foot.addWidget(ow_lbl)
+        foot.addSpacing(14)
+        self.tidy = ToggleSwitch()
+        self.tidy.setChecked(bool(self.settings.get("tidy", True)))
+        self.tidy.toggled.connect(lambda _: self.settings_changed())
+        tidy_lbl = QLabel("Tidy up lines")
+        tip = "One sentence per subtitle, at most 2 lines, capital letters repaired. Timing is fixed either way."
+        for wdg in (self.tidy, tidy_lbl):
+            wdg.setToolTip(tip)
+        tidy_lbl.mousePressEvent = lambda e: self.tidy.toggle()
+        foot.addWidget(self.tidy)
+        foot.addWidget(tidy_lbl)
         foot.addStretch(1)
         self.overall = QLabel("")
         self.overall.setObjectName("muted")
@@ -618,6 +629,7 @@ class MainWindow(QMainWindow):
     def settings_changed(self):
         self.settings["suffix"] = ".eng" if self.seg_group.checkedId() == 1 else ".en"
         self.settings["overwrite"] = self.overwrite.isChecked()
+        self.settings["tidy"] = self.tidy.isChecked()
         save_settings(self.settings)
 
     def submit(self, j: Job):
@@ -730,10 +742,15 @@ class MainWindow(QMainWindow):
             lo, hi = data["offsets"]
             shift = f"{lo:+.1f} s" if abs(hi - lo) < 0.05 else f"{lo:+.1f} → {hi:+.1f} s"
             n_runs = len(data["runs"])
+            from .pipeline import tidy_details, tidy_summary
+
+            tidy = data.get("tidy") or {}
+            recut = tidy_summary(tidy)
             j.text = os.path.basename(data["out"])
             j.detail = (f"{data['matched']}/{data['total']} lines matched · shifts {shift}"
                         + (f" · {n_runs} timing sections" if n_runs > 1 else "")
                         + (f" · {sum(data['ends'][:2])} endings extended" if sum(data['ends'][:2]) else "")
+                        + (f" · {recut}" if recut else "")
                         + f" · audio: {data['lang']}")
             st = data.get("stats", {})
             runs = "\n".join(f"   {self._ts(a)}–{self._ts(b)}:  {o:+.2f} s" for a, b, o in data["runs"])
@@ -743,7 +760,8 @@ class MainWindow(QMainWindow):
                          f"Timing sections found:\n{runs}\n"
                          f"Endings extended so lines stay until spoken: {data['ends'][0]}\n"
                          f"Endings extended to a readable minimum: {data['ends'][1]}\n"
-                         + (f"Lines with too little room before the next line: {data['ends'][2]}\n" if data['ends'][2] else "") +
+                         + (f"Lines with too little room before the next line: {data['ends'][2]}\n" if data['ends'][2] else "")
+                         + (tidy_details(tidy) + "\n" if tidy else "") +
                          f"Time: {data['seconds']:.0f} s\n\nDouble-click to show the file")
             self.run_done += 1
         elif kind in ("warning", "error", "cancelled"):

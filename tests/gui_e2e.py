@@ -65,6 +65,13 @@ if __name__ == '__main__':
         if j.state == DONE: w.retry(j)
     pump(30, lambda: not w.running)
     print("run3 files:", sorted(f for f in os.listdir(W) if f.endswith(".srt")))
+    print("run3 detail:", [j.detail for j in w.jobs if j.state == DONE])
+    # run 4: Tidy up lines off (original layout, word timing only)
+    w.tidy.setChecked(False)
+    for j in w.jobs:
+        if j.state == DONE: w.retry(j)
+    pump(30, lambda: not w.running)
+    print("run4 detail:", [j.detail for j in w.jobs if j.state == DONE])
     print("settings:", open(f"{ROOT}/settings.json").read().replace("\n", " ")[:200])
     print("cache:", os.listdir(f"{ROOT}/cache/transcripts"))
     w.close(); pump(1)

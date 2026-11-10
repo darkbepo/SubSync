@@ -1,7 +1,7 @@
 """SubSync command line (started by subsync-cli.exe).
 
     subsync-cli sync <files or folders...> [--pair VIDEO SUBTITLE] [--suffix en|eng]
-                     [--overwrite] [--cpu] [--report FILE.json]
+                     [--overwrite] [--keep-layout] [--cpu] [--report FILE.json]
 
 Exit codes: see EXIT_* below and README-CLI.md.
 """
@@ -51,10 +51,24 @@ def parse(argv):
     p.add_argument("--pair", nargs=2, action="append", default=[], metavar=("VIDEO", "SUBTITLE"))
     p.add_argument("--suffix", choices=["en", "eng", ".en", ".eng"], default="en")
     p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--keep-layout", action="store_true")  # turn "Tidy up lines" off
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--report", metavar="FILE.json")
     p.add_argument("-h", "--help", action="store_true")
     return p.parse_args(argv)
+
+
+def done_fields(data) -> dict:
+    """JSON report fields for a synced item."""
+    lo, hi = data["offsets"]
+    t = data.get("tidy") or {}
+    return {"status": "synced", "output": data["out"], "lines_matched": data["matched"],
+            "lines_with_speech": data["total"], "audio_language": data["lang"],
+            "shift_min": round(lo, 3), "shift_max": round(hi, 3), "timing_sections": len(data["runs"]),
+            "endings_extended": sum(data["ends"][:2]), "seconds": round(data["seconds"], 1),
+            "tidy": bool(t.get("tidy", False)), "subtitles_before": t.get("subtitles_before"),
+            "subtitles_after": t.get("subtitles_after"), "joined": t.get("joined", 0),
+            "split": t.get("split", 0), "capitals_fixed": t.get("capitals_fixed", 0)}
 
 
 def fmt_secs(s):
@@ -119,7 +133,7 @@ def main(argv):
     from subsync import settings as gui_settings
     from subsync.pipeline import Engine
 
-    settings = {"suffix": suffix, "overwrite": args.overwrite,
+    settings = {"suffix": suffix, "overwrite": args.overwrite, "tidy": not args.keep_layout,
                 "gpu_batch": gui_settings.load().get("gpu_batch", 0)}
     events: "queue.Queue" = queue.Queue()
     engine = Engine(lambda jid, kind, data: events.put((jid, kind, data)), lambda: settings)
@@ -197,14 +211,15 @@ def main(argv):
                 tag = f"[{finished}/{total}]"
                 name = os.path.basename(j["video"])
                 if kind == "done":
+                    from subsync.pipeline import tidy_summary
+
                     lo, hi = data["offsets"]
                     ends = sum(data["ends"][:2])
-                    j.update(status="synced", output=data["out"], lines_matched=data["matched"],
-                             lines_with_speech=data["total"], audio_language=data["lang"],
-                             shift_min=round(lo, 3), shift_max=round(hi, 3), timing_sections=len(data["runs"]),
-                             endings_extended=ends, seconds=round(data["seconds"], 1))
+                    j.update(done_fields(data))
+                    recut = tidy_summary(data.get("tidy") or {}).replace("→", "->")
                     out(f"OK   {tag} {name} -> {os.path.basename(data['out'])}  ({data['matched']}/{data['total']} lines matched, "
-                        f"shift {lo:+.1f}..{hi:+.1f} s, {len(data['runs'])} section(s), {ends} ending(s) extended)")
+                        f"shift {lo:+.1f}..{hi:+.1f} s, {len(data['runs'])} section(s), {ends} ending(s) extended"
+                        + (f", {recut}" if recut else "") + ")")
                 elif kind == "warning":
                     j.update(status="no_match", reason=data["text"], audio_language=data.get("lang"))
                     out(f"SKIP {tag} {name}: {data['text']}  (no file written)")
