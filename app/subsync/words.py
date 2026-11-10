@@ -225,3 +225,49 @@ def match_words(toks: list[Tok], words: list[tuple[float, float, str]], rough: l
                 t.end = min(t.end, nxt)
         prev = t.start
     return len(match), match
+
+
+# ------------------------------------------------------------------ retiming
+def cue_words(toks: list[Tok]) -> dict[int, list[Tok]]:
+    out: dict[int, list[Tok]] = {}
+    for t in toks:
+        if t.kind == "word" and t.start is not None:
+            out.setdefault(t.cue, []).append(t)
+    return out
+
+
+def refine(orig: list[Line], rough: list[Line], toks: list[Tok]) -> tuple[list[Line], dict[int, float], int]:
+    """Time each original cue from its first and last spoken word.
+    Returns (new cues, {cue: speech end}, number of cues whose start came from words)."""
+    from .align import GAP, fix_endings
+
+    by_cue = cue_words(toks)
+    new = [Line(r.start, r.end, o.text) for o, r in zip(orig, rough)]
+    speech_end: dict[int, float] = {}
+    n_timed = 0
+    prev_start = None
+    for k, r in enumerate(rough):
+        ws = by_cue.get(k, [])
+        start = r.start
+        if ws and any(w.matched for w in ws[:2]):
+            cand = ws[0].start
+            lo = (prev_start + 0.05) if prev_start is not None else -1e9
+            hi = (rough[k + 1].start - 0.05) if k + 1 < len(rough) else 1e9
+            if lo <= cand <= hi:
+                start = cand
+                n_timed += 1
+        if ws and any(w.matched for w in ws[-2:]):
+            speech_end[k] = ws[-1].end
+        dur = r.end - r.start
+        new[k].start = start
+        new[k].end = max(start + dur, start + 0.5)
+        prev_start = start
+    # moving a start must not make a cue run over the next one
+    for k in range(len(new) - 1):
+        a, b = new[k], new[k + 1]
+        if b.start > a.start and a.end > b.start - GAP:
+            a.end = max(b.start - GAP, a.start + 0.3)
+            if a.end > b.start:
+                a.end = b.start
+    fix_endings(new, [Line(l.start, l.end, l.text) for l in new], speech_end)
+    return new, speech_end, n_timed

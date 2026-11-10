@@ -120,5 +120,58 @@ class MatchTests(unittest.TestCase):
         self.assertGreater(n, 0.95 * len(words))
 
 
+def _refine(cues, spec, rough=None):
+    rough = rough or [Line(c.start, c.end, c.text) for c in cues]
+    toks = W.tokenize(cues)
+    W.match_words(toks, _words(spec), rough)
+    return W.refine(cues, rough, toks)
+
+
+class RefineTests(unittest.TestCase):
+    def test_refine_mid_sentence_start(self):
+        cues = [Line(357.86, 359.75, "The man who'd pay\nher ransom"),
+                Line(359.79, 361.01, "is lying in a pool\nof his own blood.")]
+        new, _, n = _refine(cues, "The@357.73 man@357.95 who'd@358.11 pay@358.33 her@358.47 ransom@358.61 "
+                                  "is@358.87 lying@359.07 in@359.27 a@359.41 pool@359.49 of@359.67 his@359.79 "
+                                  "own@359.93 blood.@360.11")
+        self.assertAlmostEqual(new[1].start, 358.87, delta=0.01)
+        self.assertAlmostEqual(new[0].start, 357.73, delta=0.01)
+        self.assertEqual(n, 2)
+        self.assertEqual(new[1].text, cues[1].text)
+
+    def test_refine_short_first_sentence(self):
+        cues = [Line(536.96, 540.55, "Where were you last night?"),
+                Line(540.60, 543.90, "Hmm. Let me see.\nI don't rightly recall.")]
+        new, _, _ = _refine(cues, "Where@538.00 were@538.18 you@538.36 last@538.48 night?@538.72 Hmm.@539.28 "
+                                  "Let@540.48 me@540.72 see.@540.86 I@542.20 don't@542.68 rightly@542.88 recall.@543.06")
+        self.assertAlmostEqual(new[1].start, 539.28, delta=0.01)
+
+    def test_refine_back_to_back_end(self):
+        cues = [Line(15.90, 17.28, "Hey, you're early.\nHey, agent van pelt reporting\nfor the night shift,"),
+                Line(17.32, 20.67, "marshal gorman.")]
+        new, speech_end, _ = _refine(cues, "Hey,@15.9 you're@16.2 early.@16.5 Hey,@16.9 agent@17.2 van@17.5 "
+                                           "pelt@17.8 reporting@18.1 for@18.4 the@18.55 night@18.6 shift,@18.75 "
+                                           "marshal@19.25 gorman.@19.5")
+        self.assertAlmostEqual(new[1].start, 19.25, delta=0.01)
+        self.assertGreaterEqual(new[0].end, 19.05)
+        self.assertLessEqual(new[0].end, new[1].start - 0.084 + 1e-6)
+        self.assertAlmostEqual(speech_end[0], 19.05, delta=0.01)
+
+    def test_refine_never_reorders(self):
+        # file order 0,1,2 but cue 1 starts before cue 0 (a badly shifted cue); the words for
+        # cue 1 are heard before cue 0's, so a refined start would jump past its neighbour
+        cues = [Line(10.0, 10.8, "alpha beta"), Line(9.5, 10.4, "gamma delta"), Line(11.0, 11.8, "epsilon zeta")]
+        new, _, _ = _refine(cues, "gamma@8.0 delta@8.3 alpha@10.0 beta@10.3 epsilon@11.0 zeta@11.3")
+        self.assertEqual(new[1].start, 9.5)  # kept its rough start
+        self.assertGreaterEqual(new[2].start, max(new[0].start, new[1].start) + 0.05)
+
+    def test_refine_unmatched_keeps_rough(self):
+        cues = [Line(1.0, 3.0, "Hello there."), Line(4.0, 6.0, "zzzq qqqz"), Line(7.0, 9.0, "Bye now.")]
+        new, speech_end, n = _refine(cues, "Hello@1.2 there.@1.5 Bye@7.1 now.@7.4")
+        self.assertEqual((new[1].start, new[1].end), (4.0, 6.0))
+        self.assertNotIn(1, speech_end)
+        self.assertEqual(n, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
