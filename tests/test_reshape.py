@@ -204,5 +204,28 @@ class CaseTests(unittest.TestCase):
         self.assertEqual(st["capitals_fixed"], 1)
 
 
+class SplitTallTests(unittest.TestCase):
+    def test_split_tall_four_rows(self):
+        rows = ["a" * 19 + ".", "b" * 20, "c" * 20, "d" * 20]
+        new, n = R.split_tall([Line(10.0, 14.0, "\n".join(rows))])
+        self.assertEqual(n, 1)
+        self.assertEqual([l.text for l in new], ["\n".join(rows[:2]), "\n".join(rows[2:])])
+        self.assertAlmostEqual(new[0].start, 10.0)
+        self.assertAlmostEqual(new[1].end, 14.0)
+        self.assertAlmostEqual(new[1].start, 12.0, delta=0.1)
+        self.assertLessEqual(new[0].end, new[1].start)
+
+    def test_split_tall_prefers_sentence_end(self):
+        # 3 rows -> 2 cues either way; the cut goes after the row that ends a sentence
+        rows = ["One.", "Two two two two", "three three."]
+        new, _ = R.split_tall([Line(0.0, 6.0, "\n".join(rows))])
+        self.assertEqual([l.text for l in new], ["One.", "Two two two two\nthree three."])
+
+    def test_split_tall_leaves_two_rows(self):
+        cues = [Line(1.0, 3.0, "Hello\nthere")]
+        new, n = R.split_tall(cues)
+        self.assertEqual((n, [(l.start, l.end, l.text) for l in new]), (0, [(1.0, 3.0, "Hello\nthere")]))
+
+
 if __name__ == "__main__":
     unittest.main()

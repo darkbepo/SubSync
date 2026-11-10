@@ -234,6 +234,42 @@ def fix_case(toks: list[Tok], words, match: dict[int, int]) -> int:
     return len(touched)
 
 
+def split_tall(lines) -> tuple[list, int]:
+    """Audio not in English (no word timings): split cues taller than two rows into as few
+    two-row cues as possible, cutting after a sentence end where there is a choice; time is
+    divided in proportion to the visible characters."""
+    from itertools import combinations
+
+    from .subtitles import Line
+
+    out, n_split = [], 0
+    for l in lines:
+        rows = l.text.split("\n")
+        if len(rows) <= 2:
+            out.append(Line(l.start, l.end, l.text))
+            continue
+        n_split += 1
+        n_cues = (len(rows) + 1) // 2
+        best = None
+        for cuts in combinations(range(1, len(rows)), n_cues - 1):
+            bounds = (0,) + cuts + (len(rows),)
+            if any(b - a > 2 for a, b in zip(bounds, bounds[1:])):
+                continue
+            score = sum(1 for c in cuts if _END.search(_TAG.sub("", rows[c - 1]).strip()))
+            if best is None or score > best[0]:
+                best = (score, bounds)
+        bounds = best[1]
+        groups = ["\n".join(rows[a:b]) for a, b in zip(bounds, bounds[1:])]
+        sizes = [max(1, len(_TAG.sub("", g).replace("\n", " ").strip())) for g in groups]
+        t, dur = l.start, l.end - l.start
+        for g, size in zip(groups, sizes):
+            end = t + dur * size / sum(sizes)
+            out.append(Line(t, end, g))
+            t = end
+        out[-1].end = l.end
+    return out, n_split
+
+
 _OPEN = re.compile(r"<\s*([a-zA-Z]+)[^>]*>")
 _CLOSE = re.compile(r"<\s*/\s*([a-zA-Z]+)\s*>")
 
