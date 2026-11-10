@@ -8,7 +8,7 @@ and (fix_case) letter case.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .align import MAX_DURATION
 from .words import Tok
@@ -164,6 +164,169 @@ def split_long(sent: list[Tok]) -> list[list[Tok]]:
         return [sent]
     i = best[1]
     return split_long(sent[:i]) + split_long(sent[i:])
+
+
+_OPEN = re.compile(r"<\s*([a-zA-Z]+)[^>]*>")
+_CLOSE = re.compile(r"<\s*/\s*([a-zA-Z]+)\s*>")
+
+
+def _balance_tags(pieces: list[list[Tok]]) -> list[list[Tok]]:
+    """Inline tags (<i>...</i>) cut by a new cue boundary are closed at the end of the
+    cue and reopened at the start of the next one."""
+    out = []
+    stack: list[Tok] = []  # open tags carried over from earlier pieces
+    for p in pieces:
+        pre = [replace(t, glue=False) for t in stack]
+        body = list(p)
+        if pre:
+            fw = next((k for k, t in enumerate(body) if t.kind != "tag" or not _CLOSE.fullmatch(t.text)), None)
+            if fw is not None:
+                body[fw] = replace(body[fw], glue=True)
+        for t in p:
+            if t.kind != "tag":
+                continue
+            c = _CLOSE.fullmatch(t.text)
+            o = _OPEN.fullmatch(t.text)
+            if c:
+                for k in range(len(stack) - 1, -1, -1):
+                    if _OPEN.fullmatch(stack[k].text).group(1).lower() == c.group(1).lower():
+                        del stack[k]
+                        break
+            elif o:
+                stack.append(t)
+        post = [Tok(t.cue, t.row, f"</{_OPEN.fullmatch(t.text).group(1)}>", "tag", glue=True) for t in reversed(stack)]
+        out.append(pre + body + post)
+    return out
+
+
+def _render(toks: list[Tok], dashed_at: int | None = None) -> str:
+    toks = [t for t in toks if t.kind != "dash"]
+    pos = [t for t in toks if t.kind == "tag" and t.text.startswith("{")]
+    rest = [t for t in toks if not (t.kind == "tag" and t.text.startswith("{"))]
+    head = "".join(dict.fromkeys(t.text for t in pos))
+    if dashed_at is not None:
+        a = [t for t in dashed_at[0] if t.kind != "dash" and not t.text.startswith("{")]
+        b = [t for t in dashed_at[1] if t.kind != "dash" and not t.text.startswith("{")]
+        return head + "- " + _join(a) + "\n- " + _join(b)
+    return head + wrap(rest)
+
+
+def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int, float], dict]:
+    """Regroup the timed tokens of a whole file into new cues (see module docstring).
+    Returns (new cues, {new cue: speech end}, stats)."""
+    from .align import GAP, MIN_DURATION, SPEECH_TAIL, fix_endings
+    from .subtitles import Line
+
+    has_words = {t.cue for t in toks if t.kind == "word"}
+    standalone = [k for k in range(len(orig)) if k not in has_words]
+    # position tags ({\an8}) belong to the whole original cue
+    pos_tags: dict[int, list[Tok]] = {}
+    for t in toks:
+        if t.kind == "tag" and t.text.startswith("{") and t.cue in has_words:
+            pos_tags.setdefault(t.cue, []).append(t)
+    stream = [t for t in toks if t.cue in has_words and not (t.kind == "tag" and t.text.startswith("{"))]
+    # a sound description that ends its original cue belongs to the sentence before it
+    last_real = {}
+    for k, t in enumerate(stream):
+        if t.kind != "tag":
+            last_real[t.cue] = k
+    back = {id(stream[k]) for k in last_real.values() if stream[k].kind == "sound"}
+
+    sents = sentences(stream)
+    fixed: list[list[Tok]] = []
+    for s in sents:
+        lead = []
+        while s and (id(s[0]) in back or (s[0].kind == "tag" and _CLOSE.fullmatch(s[0].text))):
+            lead.append(s.pop(0))
+        if lead and fixed:
+            fixed[-1].extend(lead)
+        elif lead:
+            s[:0] = lead
+        if s and not any(t.kind == "word" for t in s) and fixed:
+            fixed[-1].extend(s)
+        elif s:
+            fixed.append(s)
+
+    pieces: list[list[Tok]] = []
+    for s in fixed:
+        pieces.extend(split_long(s))
+
+    # short replies: combine with a neighbour so they don't flash by
+    def span(p):
+        ws = _words(p)
+        return ws[0].start, ws[-1].end
+
+    cues: list[tuple[list[Tok], tuple | None]] = []  # (tokens, (a, b) if dashed)
+    k = 0
+    while k < len(pieces):
+        p = pieces[k]
+        s, e = span(p)
+        if e - s + SPEECH_TAIL < MIN_DURATION and k + 1 < len(pieces):
+            q = pieces[k + 1]
+            qs, qe = span(q)
+            if visible_len(p) <= MAX_ROW and visible_len(q) <= MAX_ROW and qe - s <= MAX_DURATION:
+                if qs - e >= 0.5:
+                    cues.append((p + q, (p, q)))
+                    k += 2
+                    continue
+                if visible_len(p + q) <= MAX_CHARS:
+                    cues.append((p + q, None))
+                    k += 2
+                    continue
+        if e - s + SPEECH_TAIL < MIN_DURATION and cues and cues[-1][1] is None:
+            prev = cues[-1][0]
+            ps, _ = span(prev)
+            if visible_len(prev) <= MAX_ROW and visible_len(p) <= MAX_ROW and e - ps <= MAX_DURATION \
+                    and s - span(prev)[1] < 0.5:
+                cues[-1] = (prev + p, None)
+                k += 1
+                continue
+        cues.append((p, None))
+        k += 1
+
+    bal = _balance_tags([c[0] for c in cues])
+    built = []  # dicts: line, speech_end (None for sound-only cues), from_cues
+    for (toks_c, dashed), b in zip(cues, bal):
+        src = sorted({t.cue for t in toks_c if t.kind == "word"})
+        tags = [t for c in src for t in pos_tags.get(c, [])]
+        if dashed:
+            q0 = dashed[1][0]  # first token of the reply: _balance_tags keeps it as the same object
+            cut = next(i for i, t in enumerate(b) if t is q0)
+            text = _render(tags + b, (b[:cut], b[cut:]))
+        else:
+            text = _render(tags + b)
+        s, e = span(toks_c)
+        built.append({"line": Line(s, e, text), "speech_end": e, "from": src})
+    for k in standalone:
+        built.append({"line": Line(rough[k].start, rough[k].end, orig[k].text), "speech_end": None, "from": [k]})
+    # file order; a sound-only cue goes before the re-cut cue made from the cues after it
+    built.sort(key=lambda b: (b["from"][0], b["speech_end"] is not None))
+    new = [b["line"] for b in built]
+    speech_end = {k: b["speech_end"] for k, b in enumerate(built) if b["speech_end"] is not None}
+    # starts strictly increasing: word-timed cues stay put, sound-only cues give way
+    for k in range(1, len(new)):
+        if new[k].start >= new[k - 1].start + 0.05:
+            continue
+        if k not in speech_end:                       # this one is a sound-only cue: move it later
+            new[k].start = new[k - 1].start + 0.05
+        elif k - 1 not in speech_end:                 # the one before is sound-only: move it earlier
+            floor = new[k - 2].start + 0.05 if k >= 2 else 0.0
+            new[k - 1].start = max(floor, new[k].start - 0.5)
+    for k in range(len(new) - 1):
+        a, b = new[k], new[k + 1]
+        if a.end > b.start - GAP:
+            a.end = max(a.start + 0.05, b.start - GAP)
+        if a.end <= a.start:
+            a.end = a.start + 0.05
+    fix_endings(new, [Line(l.start, l.end, l.text) for l in new], speech_end)
+    from_cues = [b["from"] for b in built]
+    joined = sum(1 for f in from_cues if len(f) > 1)
+    seen: dict[int, int] = {}
+    for f in from_cues:
+        for c in f:
+            seen[c] = seen.get(c, 0) + 1
+    split = sum(1 for c, n in seen.items() if n > 1)
+    return new, speech_end, {"joined": joined, "split": split, "from_cues": from_cues}
 
 
 def wrap(toks: list[Tok]) -> str:

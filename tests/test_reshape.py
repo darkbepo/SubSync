@@ -84,5 +84,81 @@ class SentenceTests(unittest.TestCase):
         self.assertEqual(R.wrap(R.sentences(toks)[0]), "<i>Thanks</i> a lot.")
 
 
+def run(cues, spec=None):
+    toks, words = timed(cues, spec)
+    _, match = W.match_words(toks, words, cues)
+    return R.reshape(cues, cues, toks, words, match)
+
+
+class ReshapeTests(unittest.TestCase):
+    def test_two_speakers_separate(self):
+        cues = [Line(258.81, 263.0, "All right. Put out\nan amber alert and a b.O.L.O.\nAlready did. I've set up\n"
+                                    "a perimeter and notified c.H.P.")]
+        spec = ("All@258.0 right.@258.2 Put@258.6 out@258.8 an@259.0 amber@259.2 alert@259.5 and@259.8 a@259.9 "
+                "BOLO.@260.0 Already@260.9 did.@261.2 I've@261.5 set@261.7 up@261.9 a@262.1 perimeter@262.3 "
+                "and@262.7 notified@262.9 CHP.@263.3")
+        new, _, _ = run(cues, spec)
+        self.assertGreaterEqual(len(new), 2)
+        self.assertTrue(all(len(l.text.split("\n")) <= 2 for l in new), [l.text for l in new])
+        self.assertTrue(any(l.text.startswith("Already did.") or l.text.startswith("I've") for l in new))
+
+    def test_short_reply_dashed(self):
+        new, _, _ = run([Line(10.0, 10.9, "Thanks."), Line(11.0, 12.0, "You're welcome.")],
+                        "Thanks.@10.0 You're@11.0 welcome.@11.3")
+        self.assertEqual([l.text for l in new], ["- Thanks.\n- You're welcome."])
+
+    def test_short_same_speaker_joined(self):
+        new, _, _ = run([Line(10.0, 10.4, "Okay."), Line(10.4, 11.5, "Let's go.")], "Okay.@10.0 Let's@10.4 go.@10.7")
+        self.assertEqual([l.text for l in new], ["Okay. Let's go."])
+
+    def test_sound_attaches_forward(self):
+        new, _, _ = run([Line(15.9, 17.3, "Hey, agent van pelt reporting\nfor the night shift,"),
+                         Line(17.3, 20.7, "marshal gorman.\n(Chuckles) At ease, grace.")])
+        self.assertTrue(any(l.text.startswith("(Chuckles) At ease, grace.") for l in new), [l.text for l in new])
+
+    def test_sound_at_cue_end_attaches_back(self):
+        new, _, _ = run([Line(21.7, 23.2, "We're not invading\nafghanistan.\n(Lock click)"),
+                         Line(23.2, 26.4, "Yeah, i know, but you know\nwhat the rules say. Thanks.")])
+        cue = next(l for l in new if "afghanistan." in l.text)
+        self.assertIn("(Lock click)", cue.text)
+
+    def test_sound_only_cues_kept(self):
+        new, _, _ = run([Line(5.8, 7.5, "(Engine turns off)"), Line(15.9, 17.3, "Hey, you're early.")])
+        self.assertIn(("(Engine turns off)", 5.8, 7.5), [(l.text, l.start, l.end) for l in new])
+
+    def test_italic_across_split(self):
+        new, _, _ = run([Line(1, 5, "<i>One sentence here. Another one</i>\n<i>follows.</i>")])
+        self.assertGreaterEqual(len(new), 2)
+        for l in new:
+            self.assertEqual(l.text.count("<i>"), l.text.count("</i>"), l.text)
+
+    def test_position_tag_copied(self):
+        new, _, _ = run([Line(1, 6, "{\\an8}The first one is here.\nThe second one is there.")])
+        self.assertEqual(len(new), 2)
+        self.assertTrue(all(l.text.startswith("{\\an8}") for l in new), [l.text for l in new])
+
+    def test_fast_dialogue_no_overlap(self):
+        new, _, _ = run([Line(10, 11.8, "Go. Now. Run. Hide. Wait. Stop.")],
+                        "Go.@10.0 Now.@10.3 Run.@10.6 Hide.@10.9 Wait.@11.2 Stop.@11.5")
+        for a, b in zip(new, new[1:]):
+            self.assertLessEqual(a.end, b.start - 0.084 + 1e-6, (a, b))
+            self.assertLess(a.start, b.start)
+
+    def test_stats_joined_split(self):
+        _, _, st = run([Line(357.86, 359.75, "The man who'd pay\nher ransom"),
+                        Line(359.79, 361.01, "is lying in a pool\nof his own blood.")])
+        self.assertGreaterEqual(st["joined"], 1)
+        _, _, st = run([Line(540.6, 545.9, "Hmm. Let me see now.\nI don't rightly recall.")])
+        self.assertGreaterEqual(st["split"], 1)
+
+    def test_words_never_change(self):
+        cues = [Line(1, 4, "All right. Put out\nan amber alert, (Sighs) and a b.O.L.O."), Line(4, 6, "(Door closes)"),
+                Line(6, 9, "- Yes.\n- <i>No, i won't.</i>")]
+        new, _, _ = run(cues)
+        before = [t.text for t in W.tokenize(cues) if t.kind in ("word", "sound", "label")]
+        after = [t.text for t in W.tokenize(new) if t.kind in ("word", "sound", "label")]
+        self.assertEqual(before, after)
+
+
 if __name__ == "__main__":
     unittest.main()
