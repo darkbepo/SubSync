@@ -42,6 +42,7 @@ D:\Tools\SubSync\subsync-cli.exe .
 | `--pair VIDEO SUBTITLE` | Sync this exact pair. Repeatable. Files given here are left out of automatic pairing. |
 | `--suffix en` / `--suffix eng` | Result name `<video>.en.srt` (default) or `<video>.eng.srt`. |
 | `--overwrite` | Replace an existing result. Without it the existing file is kept and the result is `<video>.en.#1.srt` (`#2`, …). If the existing file is open in another program, SubSync waits up to 5 minutes for it to be released. |
+| `--keep-layout` | Turn *Tidy up lines* off: keep the original line layout and capitals. The timing is still fixed line by line. (The window's setting does not affect the command line; tidying is on unless this option is given.) |
 | `--cpu` | Don't use the NVIDIA GPU (slower; for testing, or if the GPU is busy). |
 | `--report FILE.json` | Write a machine-readable report (format below). |
 
@@ -58,14 +59,14 @@ SubSync 2026-11-08 20:15: 3 pair(s) to sync, 1 file(s) without a partner
     3. Show.S01E03.1080p.mkv  <-  Show.S01E03.srt
    skip Show.S01E04.1080p.mkv  (no matching subtitle)
 Speech recognition: GPU (NVIDIA GeForce RTX 3050)
-OK   [1/3] Show.S01E01.1080p.mkv -> Show.S01E01.1080p.en.srt  (612/640 lines matched, shift -2.1..+0.4 s, 2 section(s), 14 ending(s) extended)
+OK   [1/3] Show.S01E01.1080p.mkv -> Show.S01E01.1080p.en.srt  (612/640 lines matched, shift -2.1..+0.4 s, 2 section(s), 14 ending(s) extended, 668 -> 655 subtitles)
 SKIP [2/3] Show.S01E02.1080p.mkv: Only 9 of 655 lines matched the audio – wrong subtitle for this video?  (no file written)
 FAIL [3/3] Show.S01E03.1080p.mkv: Could not read the audio: …
 Done in 4m 12s: 1 synced, 1 did not match their video, 1 failed, 1 without a partner.
 Details: D:\Tools\SubSync\logs\cli.log
 ```
 
-- **OK**: synced and saved. *shift* is how far lines moved. More than one *section* means the file was partly out of sync. *Endings extended* counts lines kept on screen until their words were spoken or long enough to read.
+- **OK**: synced and saved. *shift* is how far lines moved. More than one *section* means the file was partly out of sync. *Endings extended* counts lines kept on screen until their words were spoken or long enough to read. *before -> after subtitles* appears when *Tidy up lines* changed the number of subtitles.
 - **SKIP**: too few lines matched the speech, almost always the wrong subtitle (another episode, cut or language). Nothing is written.
 - **FAIL**: an error, with the reason. The full error is in `logs\cli.log`.
 
@@ -91,7 +92,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 
 ```json
 {
-  "subsync_version": "1.1.0",
+  "subsync_version": "1.2.0",
   "finished": "2026-11-08T20:19:27",
   "exit_code": 3,
   "seconds": 252.4,
@@ -109,7 +110,13 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
       "shift_max": 0.4,
       "timing_sections": 2,
       "endings_extended": 14,
-      "seconds": 81.3
+      "seconds": 81.3,
+      "tidy": true,
+      "subtitles_before": 668,
+      "subtitles_after": 655,
+      "joined": 120,
+      "split": 107,
+      "capitals_fixed": 85
     },
     { "video": "…S01E02…", "subtitle": "…", "status": "no_match",
       "reason": "Only 9 of 655 lines matched the audio – wrong subtitle for this video?", "audio_language": "en" },
@@ -119,7 +126,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 }
 ```
 
-`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file).
+`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones.
 
 ## Logs
 
@@ -131,6 +138,7 @@ All in the `logs` folder next to the exe:
 | `worker.log` | The speech-recognition process: GPU/CPU choice, GPU library loading, crashes. |
 | `setup.log` | Downloads, self-check repairs, setup failures. |
 | `app.log` | The window version. |
+| `details\<video name>.tsv` | One row per written subtitle: original subtitle number(s), old and new time, words heard, what changed (window and command line; the 200 newest are kept). |
 
 ## Examples
 
@@ -184,7 +192,10 @@ SubSync.exe / subsync-cli.exe     Go, no dependencies; same code, built as GUI o
        app\subsync\
          pipeline.py                job queue: decode → speech recognition → matching → write
          asr_worker.py              separate process: audio decode + voice detection + Whisper (GPU/CPU)
-         align.py                   per-line alignment, timing sections, speech-aware endings
+         align.py                   rough per-line alignment, timing sections, speech-aware endings
+         words.py                   subtitle words ↔ Whisper words; cues timed from their first/last word
+         reshape.py                 "Tidy up lines": re-cut by sentence/speaker, 2-row wrap, capitals
+         details.py                 logs\details\*.tsv
          embed.py                   multilingual sentence embeddings (MiniLM, ONNX, CPU)
          media.py / subtitles.py    audio track choice + decoding / subtitle reading & writing
          pairing.py                 video ↔ subtitle pairing
@@ -246,8 +257,18 @@ python sim.py                                  # alignment accuracy: 45-min epis
                                                # early endings, English and other-language audio
 python make_fixtures.py && python gui_e2e.py   # window end-to-end (videos with synthesized speech)
 python cli_e2e.py "whole folder"               # command line end-to-end (also: "explicit pair + eng",
-                                               # "wrong subtitle (no match)", "nothing to pair", ...)
+                                               # "wrong subtitle (no match)", "nothing to pair", "keep layout", ...)
+python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
+
+**Trying a change on a real episode** without rebuilding the exe or re-running speech recognition (the episode must have been synced once, so its transcript is cached):
+
+```bat
+D:\Tools\SubSync\runtime\python\python.exe tools\replay.py D:\Tools\SubSync "D:\Shows\Ep.mkv" "D:\Shows\Ep.original.srt" out.srt [--keep-layout]
+D:\Tools\SubSync\runtime\python\python.exe tools\measure.py D:\Tools\SubSync\cache\transcripts\<hash>.json.gz out.srt
+```
+
+`measure.py` reports how many subtitles start within 0.3 s of their first spoken word, how many disappear before their words are spoken, overlaps, rows per subtitle and the longest row.
 
 The end-to-end tests replace Whisper with the known transcript of the test videos. Everything else is real: audio decoding, voice detection, the worker process, matching and file writing.
 

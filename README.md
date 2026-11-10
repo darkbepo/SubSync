@@ -45,6 +45,8 @@ You can keep adding files while it is running; they join the queue. **Stop** can
 | **Save as `.en.srt` / `.eng.srt`** | The language tag in the file name. |
 | **Overwrite existing** (on) | If a subtitle with that name already exists, it is replaced. If another program (a player, a Jellyfin scan) has it open, SubSync waits until it is released. |
 | **Overwrite existing** (off) | The existing file is kept and the new one is saved as `name.en.#1.srt` (then `#2`, …). |
+| **Tidy up lines** (on, the default) | The subtitle is re-cut so each subtitle holds one sentence (or a natural part of a long one), with at most 2 lines of 42 characters. Different speakers get their own subtitle; very short replies are paired with dashes (`- Thanks.` / `- You're welcome.`). Capital letters are repaired (`i` → `I`, names as they were spoken). The words themselves are never changed. |
+| **Tidy up lines** (off) | The original layout and capitals are kept. The timing is still fixed line by line. |
 
 ## What SubSync fixes
 
@@ -53,6 +55,8 @@ You can keep adding files while it is running; they join the queue. **Stop** can
 - **Drift**: gets slowly worse over the episode.
 - **Single bad lines**: one line far off while its neighbours are fine.
 - **Lines that vanish too early**: a line is kept on screen until its words have been spoken, and every line stays up long enough to read (at least 1 second, at most ~20 characters per second). Lines are never stretched over the next line and never made shorter.
+- **Lines that appear late** (English audio): every line starts when its first word is spoken and ends after its last, even when the line starts in the middle of a sentence. This matters most for TV captions, which often lag behind the speech.
+- **Messy TV captions** (with *Tidy up lines*): sentences chopped across subtitles, two speakers squeezed into one subtitle, 3–4 line subtitles and missing capitals.
 
 The audio may be in any language. The subtitle must be **English**. When a video has several audio tracks, SubSync prefers the English one, because matching is most precise when audio and subtitle share a language.
 
@@ -62,7 +66,9 @@ The audio may be in any language. The subtitle must be **English**. When a video
 - **Check**: SubSync could match only a few lines to the audio, usually because the subtitle belongs to a different video or episode. **No file is written** in this case.
 - **Failed**: something went wrong. Hover for the reason.
 
-Lines that are not speech (`[door slams]`, `♪ music ♪`) are moved along with the lines around them.
+Lines that are not speech (`[door slams]`, `♪ music ♪`) are moved along with the lines around them. With *Tidy up lines*, a sound description inside a line stays next to the sentence it belongs with, and the summary also shows how many subtitles there were before and after.
+
+The new timing and re-cutting need English audio. With audio in another language the timing works as before, and *Tidy up lines* only splits subtitles taller than 2 lines.
 
 ## Speed
 
@@ -86,6 +92,7 @@ The downloads have **backup sources**. If a link stops working (python.org, the 
 
 - **The status chip in the top-right says "CPU mode"**: no usable NVIDIA card was found, or its driver is too old. Updating the NVIDIA driver usually fixes this.
 - **An error window appears at start**: it shows what went wrong. The full details are in the `logs` folder (`app.log`, `worker.log`, `startup.log`). Send those if you report a problem.
+- **A synced subtitle looks wrong somewhere**: `logs\details\<video name>.tsv` lists every subtitle that was written: where it came from, its old and new time, how many of its words were heard, and what was changed. Send that file with the time in the episode.
 - **Setup or repair keeps failing**: check the internet connection and start again. Finished downloads are kept. Details are in `logs\setup.log`.
 - **Starting SubSync twice** just brings the open window to the front.
 - **Nothing is left running** after SubSync closes, crashes or fails to start, so the folder can always be deleted.

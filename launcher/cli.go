@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const appVersionString = "1.1.0"
+const appVersionString = "1.2.0"
 
 // Exit codes (also documented in README-CLI.md and app/subsync/cli.py).
 const (

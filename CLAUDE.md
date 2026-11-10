@@ -16,7 +16,8 @@ This file is loaded automatically at the start of every Claude Code session in t
 
 - **Released:** v1.1.0 (GitHub release `v1.1.0`, asset `SubSync-v1.1.0-windows-x64.zip`, SHA-256 `6622ccac1d935ac644ec59a084f5b3c49db5dd78bad28798ce109805e464e2dc`). The exes in that zip were built from the code in commit `0d3fa2b`. Later commits are docs, tests and tooling only. History of changes: `CHANGELOG.md`.
 - **Confirmed by the owner on real hardware** (Windows 11, NVIDIA RTX 3050): first-time setup, the window opening, the UI, no leftover processes.
-- **Not yet reported from real use:** sync accuracy on real episodes (English audio and other-language audio), and real speed per episode. Ask the owner for results, and for the `logs` folder plus the hover details of any bad result, before tuning anything.
+- **First real-use report (English audio, broadcast TV captions):** v1.1.0 left ~11% of lines > 0.5 s off (placed by phrase, not word) and cut endings off. Fixed in **1.2.0** (word-accurate timing + "Tidy up lines"), developed on branch `feat/word-timing-tidy`; measured on that episode: 99.5% of starts within 0.3 s, 0 cut-off endings. Owner confirmed Whisper's word timings match what they see. Still unreported: other-language audio, and how the re-cut subtitles read over a whole season.
+- **Dev PC used for 1.2.0** (Windows, RTX 3070): SubSync installed at `G:\subsync` with one test episode and its transcript cached; repo-local git identity is the GitHub noreply address; Go, `gh`, `windres` and espeak-ng are **not** installed (no exe build, no e2e fixtures, no launcher tests there).
 - **Parked (owner said wait):** GitHub community files (description/topics, issue templates, `SECURITY.md`). The exact drafts are in `docs/parked/community-files.md`. `CONTRIBUTING.md` was declined.
 
 ## Handoff and access
@@ -63,12 +64,20 @@ app/        Python 3.12 (run by the embedded runtime\python)
                    exits by itself if the parent dies
     align.py     the core: phrases from word timestamps → similarity (multilingual MiniLM embeddings + fuzzy text for English audio)
                  → monotonic DP matching (2 passes) → runs of consistent offset (splits/drift) → per-line offsets
-                 → strong lone matches = per-line fixes → speech-aware endings (fix_endings)
+                 → strong lone matches = per-line fixes → speech-aware endings (fix_endings). Since 1.2.0 this is the ROUGH placement.
+    words.py     (1.2.0) tokenise cues (word/sound/label/tag/dash) → banded (±4 s) monotonic word matching to Whisper words
+                 (Fenwick-tree DP, fuzzy ≥ 80, small time prior) → refine(): cue start = first word, end via fix_endings
+    reshape.py   (1.2.0) "Tidy up lines": sentences → split_long → short replies (dashes) → tags balanced → wrap (2 × 42)
+                 → fix_case; split_tall() for non-English audio
+    details.py   logs\details\<video>.tsv (200 newest kept)
+    pipeline.process()  the whole matching step as a pure function (used by the Engine, tests and tools/replay.py)
     embed.py     MiniLM ONNX (CPU) mean-pooled embeddings
     gui.py, theme.py  PySide6 window; theme follows Windows colour scheme
     pairing.py   name / episode-code (S01E04, 1x04) / fuzzy pairing
     media.py, subtitles.py, paths.py, settings.py
 tests/      sim.py (accuracy simulation), gui_e2e.py / cli_e2e.py (end-to-end with a fake ASR worker), make_fixtures.py (espeak-ng + ffmpeg)
+            test_words.py / test_reshape.py / test_ui.py (unittest; run with an installed SubSync's runtime\python\python.exe)
+tools/      replay.py (re-run process() on a cached transcript with this repo's code), measure.py (cue starts/ends vs Whisper words)
   launcher/   run.sh: 28 Wine checks of the real exes against a fake internet (fallbacks, repair, processes, CLI); see its README
 build/      build.sh (cross-compiles both exes), make_icon.py
 tools/      update_deps.sh + requirements-windows.txt / requirements-cuda.txt → make_manifest.py → launcher/manifest.json
@@ -105,11 +114,15 @@ logs\app.log (window: startup steps, crashes, Qt messages), worker.log (speech/G
 6. **SRT files are read in file order, not sorted by time.** A badly shifted section can overlap earlier lines, and the numbering is the true spoken order.
 7. **Lone per-line corrections must land strictly between their neighbours** (`lo + 0.05 ≤ ns ≤ hi − 0.05`), otherwise lines can swap places.
 8. Keep `PySide6` widget properties from shadowing Qt properties (the toggle uses `knob`, not `pos`).
+9. **A misheard word is placed from matched words of its own cue** (by character count), never by interpolating across cues: a neighbouring cue's rough position can be seconds off and drags the start with it.
+10. **Speaker changes can't be detected reliably.** Dashes are used only for very short sentences after a ≥ 0.5 s pause that also starts a new caption row; a pause on the same row is one speaker. Expect some false dashes where captioners broke rows for length.
+11. `tests/sim.py` numbers vary slightly between runs (its fake embedder uses `hash()`); compare within-0.3 s percentages, not exact counts.
+12. The installed exe restores `app\` from its embedded copy, so repo changes can't be tried by editing an install. Use `tools/replay.py` with the install's Python instead.
 
 ## Building, testing, releasing
 
 - **Build** (any OS, Go ≥ 1.24, no CGO): `./build/build.sh` produces `build/SubSync.exe` and `build/subsync-cli.exe`. The icon and manifest are pre-compiled in `launcher/rsrc_windows_amd64.syso`; rebuild that with `x86_64-w64-mingw32-windres --preprocessor=cat app.rc -O coff -o rsrc_windows_amd64.syso`.
-- **Tests** (run from `tests/`): `python sim.py`, `python make_fixtures.py && python gui_e2e.py`, `python cli_e2e.py "whole folder"`. Use `QT_QPA_PLATFORM=offscreen` for headless runs.
+- **Tests** (run from `tests/`): `python test_words.py`, `python test_reshape.py`, `python test_ui.py` (unit), `python sim.py`, `python make_fixtures.py && python gui_e2e.py`, `python cli_e2e.py "whole folder"`. Use `QT_QPA_PLATFORM=offscreen` for headless runs.
   - Reference results: about 96–99% of lines within 0.3 s on simulated 45-minute episodes, about 80% fewer cut-off endings, zero new overlaps; on the synthesized-speech fixtures, every line is within 0.05 s.
 - **Launcher tests:** `tests/launcher/run.sh` (about 5 min, 28 checks, needs wine + Xvfb + Go). Run it after any change in `launcher/`.
 - **What can't be tested in a cloud/Linux session:** real Whisper or MiniLM inference (Hugging Face and python.org may be unreachable from the sandbox), NVIDIA GPU behaviour, and real Windows window behaviour (Wine ignores the "start hidden" flag from lesson 1). Be explicit with the owner about what was and wasn't tested.

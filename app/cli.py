@@ -256,7 +256,7 @@ def write_report(path, items, skipped, code, seconds):
     if not path:
         return
     rep = {
-        "subsync_version": "1.1.0",
+        "subsync_version": "1.2.0",
         "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": code,
         "seconds": round(seconds, 1),

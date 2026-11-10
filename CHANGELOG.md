@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- **Word-accurate timing** (English audio). Every subtitle now starts when its first word is spoken and ends after its last. Before, subtitles were placed by whole spoken phrases, so lines that start mid-sentence (common in TV captions) or open with a short sentence ("Hmm. Let me see…") kept their late start. On a real broadcast-caption episode, subtitles starting within 0.3 s of their first word went from 85% to 99.5%, and lines disappearing before their words were spoken went from 9 to 0.
+- **Tidy up lines** (new setting, on by default; `--keep-layout` turns it off on the command line). Subtitles are re-cut to one sentence (or a natural part of a long one) per subtitle, at most 2 lines of 42 characters; sentences that captions chopped up are joined; different speakers get their own subtitle, very short replies are paired with dashes; sound descriptions stay with their sentence; capital letters are repaired using what Whisper heard. Words are never changed. With other-language audio only subtitles taller than 2 lines are split.
+- **Per-line details** in `logs\details\<video>.tsv` for troubleshooting.
+- The result summary, the hover details and the command-line JSON report show how many subtitles were joined, split and re-capitalised.
+
 ## 1.1.0
 
 - **Fallback download sources** for first install and repairs:
