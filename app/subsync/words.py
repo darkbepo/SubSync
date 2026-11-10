@@ -97,3 +97,131 @@ def tokenize(lines: list[Line]) -> list[Tok]:
                 if kind != "tag":
                     first = False
     return out
+
+
+# ------------------------------------------------------------------ matching
+def _expected(toks: list[Tok], rough: list[Line]) -> list[float]:
+    """Where each word token should be heard according to the rough placement:
+    spread over its cue in proportion to the characters before it."""
+    exp = [0.0] * len(toks)
+    by_cue: dict[int, list[int]] = {}
+    for i, t in enumerate(toks):
+        if t.kind == "word":
+            by_cue.setdefault(t.cue, []).append(i)
+    for c, idx in by_cue.items():
+        lens = [len(toks[i].text) for i in idx]
+        total = sum(lens) + len(lens) - 1
+        r = rough[c]
+        off = 0
+        for i, n in zip(idx, lens):
+            exp[i] = r.start + (r.end - r.start) * (off / total if total > 0 else 0.0)
+            off += n + 1
+    return exp
+
+
+class _MaxTree:
+    """Fenwick tree for prefix maxima of (value, key)."""
+
+    def __init__(self, n):
+        self.n = n
+        self.t = [(-1.0, None)] * (n + 1)
+
+    def update(self, i, item):  # i is 0-based
+        i += 1
+        while i <= self.n:
+            if item[0] > self.t[i][0]:
+                self.t[i] = item
+            i += i & -i
+
+    def query(self, i):  # max over 0-based positions < i
+        best = (0.0, None)
+        while i > 0:
+            if self.t[i][0] > best[0]:
+                best = self.t[i]
+            i -= i & -i
+        return best
+
+
+def match_words(toks: list[Tok], words: list[tuple[float, float, str]], rough: list[Line],
+                band: float = 4.0) -> tuple[int, dict[int, int]]:
+    """Match subtitle word tokens to Whisper words (in order, within `band` seconds
+    of the rough position) and give every word token a time.
+    Returns (number matched, {token index: Whisper word index})."""
+    import bisect
+
+    from rapidfuzz import fuzz
+
+    exp = _expected(toks, rough)
+    wstart = [w[0] for w in words]
+    wnorm = [norm(w[2]) for w in words]
+    tree = _MaxTree(len(words))
+    back: dict[tuple[int, int], tuple[int, int] | None] = {}
+    word_idx = [i for i, t in enumerate(toks) if t.kind == "word"]
+    for i in word_idx:
+        t = toks[i]
+        if not t.norm:
+            continue
+        lo = bisect.bisect_left(wstart, exp[i] - band)
+        hi = bisect.bisect_right(wstart, exp[i] + band)
+        found = []
+        for j in range(lo, hi):
+            wn = wnorm[j]
+            if not wn:
+                continue
+            if wn == t.norm:
+                s = 1.0
+            else:
+                s = fuzz.ratio(t.norm, wn) / 100.0
+                if s < 0.8:
+                    continue
+            prev = tree.query(j)
+            found.append((j, prev[0] + s, prev[1]))
+        for j, v, prev in found:  # update after scoring: one token never matches two words
+            back[(i, j)] = prev
+            tree.update(j, (v, (i, j)))
+    match: dict[int, int] = {}
+    key = tree.query(len(words))[1]
+    while key is not None:
+        match[key[0]] = key[1]
+        key = back[key]
+    for i, j in match.items():
+        t = toks[i]
+        t.start, t.end, t.matched = words[j][0], words[j][1], True
+    # unmatched words: shift by the interpolated (measured - expected) of their matched neighbours
+    pos = [i for i in word_idx]
+    m_pos = [k for k, i in enumerate(pos) if i in match]
+    for k, i in enumerate(pos):
+        if i in match:
+            continue
+        a = bisect.bisect_left(m_pos, k) - 1
+        b = a + 1
+        da = (toks[pos[m_pos[a]]].start - exp[pos[m_pos[a]]]) if a >= 0 else 0.0
+        db = (toks[pos[m_pos[b]]].start - exp[pos[m_pos[b]]]) if b < len(m_pos) else 0.0
+        if a >= 0 and b < len(m_pos):
+            f = (k - m_pos[a]) / (m_pos[b] - m_pos[a])
+            d = da + f * (db - da)
+        else:
+            d = 0.0
+        d = max(-band, min(band, d))
+        toks[i].start = exp[i] + d
+    # keep word times strictly increasing; unmatched words never jump over a neighbour
+    next_matched: list[float | None] = [None] * len(pos)
+    nxt = None
+    for k in range(len(pos) - 1, -1, -1):
+        next_matched[k] = nxt
+        if toks[pos[k]].matched:
+            nxt = toks[pos[k]].start
+    prev = None
+    for k, i in enumerate(pos):
+        t = toks[i]
+        if not t.matched:
+            if prev is not None and t.start <= prev + 1e-3:
+                t.start = prev + 0.01
+            nxt = next_matched[k]
+            if nxt is not None and t.start >= nxt:
+                t.start = (prev + nxt) / 2 if prev is not None else nxt - 0.05
+            t.end = t.start + max(0.15, 0.06 * len(t.text))
+            if nxt is not None:
+                t.end = min(t.end, nxt)
+        prev = t.start
+    return len(match), match
