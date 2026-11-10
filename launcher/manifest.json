@@ -2,13 +2,13 @@
  "python": {
   "name": "Python 3.12.10",
   "kind": "python",
-  "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
-  "sha256": "",
-  "size": 0,
   "version": "3.12.10",
+  "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
   "fallbacks": [
    "https://api.nuget.org/v3-flatcontainer/python/3.12.10/python.3.12.10.nupkg"
-  ]
+  ],
+  "sha256": "",
+  "size": 0
  },
  "wheels": [
   {
@@ -68,13 +68,6 @@
    "kind": "wheel"
   },
   {
-   "name": "httpcore2 2.16.0",
-   "url": "https://files.pythonhosted.org/packages/af/c2/ce417c397afa5181f0e3c6ff01a4d01639414e1adef08730d97571297151/httpcore2-2.16.0-py3-none-any.whl",
-   "sha256": "5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f",
-   "size": 85070,
-   "kind": "wheel"
-  },
-  {
    "name": "PyYAML 6.0.3",
    "url": "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
    "sha256": "5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b",
@@ -128,6 +121,13 @@
    "url": "https://files.pythonhosted.org/packages/98/33/be9ef68901200813fc174a06758b4ae48ca4eb58fa783280dd879d5fd048/msvc_runtime-14.51.36231-cp312-cp312-win_amd64.whl",
    "sha256": "89f70d1a37bb64164cdb09d02dd82d6b1400e1310be2995b4ed5a9f23efe2222",
    "size": 2052033,
+   "kind": "wheel"
+  },
+  {
+   "name": "httpcore2 2.16.0",
+   "url": "https://files.pythonhosted.org/packages/af/c2/ce417c397afa5181f0e3c6ff01a4d01639414e1adef08730d97571297151/httpcore2-2.16.0-py3-none-any.whl",
+   "sha256": "5c4358319f2602d984ad93182c9fee5160f22e9da7babdda870a5e7c4e2dc34f",
+   "size": 85070,
    "kind": "wheel"
   },
   {

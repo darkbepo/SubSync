@@ -1,5 +1,6 @@
 import os as _os, sys as _sys
 _REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+_os.chdir(_os.path.dirname(_os.path.abspath(__file__)))  # paths below are relative to tests/
 import os, sys, shutil, time, json, numpy as np
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 ROOT = "/tmp/ssroot"; shutil.rmtree(ROOT, ignore_errors=True); os.makedirs(ROOT)

@@ -12,6 +12,19 @@ This file is loaded automatically at the start of every Claude Code session in t
 - Deliverable files handed to the owner *outside* the repo (zips, notes) are named `DD-MM-YYYY-descriptive-name`. Files inside the repo keep conventional names.
 - The owner is a capable non-developer. Explain outcomes in plain language; keep jargon for code and READMEs.
 
+## Current status (keep this section up to date)
+
+- **Released:** v1.1.0 (GitHub release `v1.1.0`, asset `SubSync-v1.1.0-windows-x64.zip`, SHA-256 `6622ccac1d935ac644ec59a084f5b3c49db5dd78bad28798ce109805e464e2dc`). The exes in that zip were built from the code in commit `0d3fa2b`. Later commits are docs, tests and tooling only. History of changes: `CHANGELOG.md`.
+- **Confirmed by the owner on real hardware** (Windows 11, NVIDIA RTX 3050): first-time setup, the window opening, the UI, no leftover processes.
+- **Not yet reported from real use:** sync accuracy on real episodes (English audio and other-language audio), and real speed per episode. Ask the owner for results, and for the `logs` folder plus the hover details of any bad result, before tuning anything.
+- **Parked (owner said wait):** GitHub community files (description/topics, issue templates, `SECURITY.md`). The exact drafts are in `docs/parked/community-files.md`. `CONTRIBUTING.md` was declined.
+
+## Handoff and access
+
+- The repository is `darkbepo/SubSync` (public, MIT). A new Claude account needs a GitHub connection that can see it (the owner's account, or a collaborator). Pushing also needs the **Claude GitHub App** installed with access to this repository.
+- Claude Code sessions here can read the repo and push branches and `main`, but GitHub refuses (403) **creating repositories, releases and tags**. Only repository-scoped REST endpoints work; GraphQL and `gh release` don't.
+- New sessions start from a fresh clone and know nothing beyond this file and the repo. The design history is summarised here and in `CHANGELOG.md`; the full original conversation is not available.
+
 ## What SubSync is
 
 A Windows tool that syncs **English** subtitles to a video **line by line**, using the video's own audio. The audio may be in any language. It's built for bulk use: whole seasons of 23 × 40-minute episodes. Two front ends share one installation:
@@ -56,8 +69,30 @@ app/        Python 3.12 (run by the embedded runtime\python)
     pairing.py   name / episode-code (S01E04, 1x04) / fuzzy pairing
     media.py, subtitles.py, paths.py, settings.py
 tests/      sim.py (accuracy simulation), gui_e2e.py / cli_e2e.py (end-to-end with a fake ASR worker), make_fixtures.py (espeak-ng + ffmpeg)
+  launcher/   run.sh: 28 Wine checks of the real exes against a fake internet (fallbacks, repair, processes, CLI); see its README
 build/      build.sh (cross-compiles both exes), make_icon.py
-tools/      make_manifest.py
+tools/      update_deps.sh + requirements-windows.txt / requirements-cuda.txt → make_manifest.py → launcher/manifest.json
+docs/parked/  drafts waiting for the owner's approval
+CHANGELOG.md  what changed in each version, and why
+```
+
+### What an installed SubSync folder looks like (first stop when debugging a user's install)
+
+```
+SubSync.exe, subsync-cli.exe
+settings.json            suffix (.en/.eng), overwrite, gpu_batch (learned GPU batch size), window geometry
+sources.json             optional: user-added download locations
+app\                     Python sources, unpacked from the exe (restored if changed or missing)
+runtime\python\          embedded Python 3.12 (+ Lib\site-packages); python312._pth points at app\
+runtime\cuda\            cuBLAS / cuDNN / NVRTC DLLs (only on PCs with an NVIDIA driver)
+runtime\install-state.json   which components are installed ("vcrt2:" = the complete C++ runtime set), app version hash
+runtime\models.lock.json     model repo + exact revision + per-file size/SHA-256
+runtime\downloads\       partial downloads (resumed; deleted after setup)
+models\whisper-large-v3-turbo\, models\minilm\
+cache\transcripts\       transcript cache (gzip JSON; key = path + size + mtime + audio track + model)
+cache\tmp, cache\hf, cache\cuda, cache\window-ready.flag (launcher handshake)
+logs\app.log (window: startup steps, crashes, Qt messages), worker.log (speech/GPU), setup.log (downloads, repairs),
+     cli.log (command line), startup.log (raw stderr), worker-errors.log
 ```
 
 ## Hard-won lessons (don't regress)
@@ -76,10 +111,12 @@ tools/      make_manifest.py
 - **Build** (any OS, Go ≥ 1.24, no CGO): `./build/build.sh` produces `build/SubSync.exe` and `build/subsync-cli.exe`. The icon and manifest are pre-compiled in `launcher/rsrc_windows_amd64.syso`; rebuild that with `x86_64-w64-mingw32-windres --preprocessor=cat app.rc -O coff -o rsrc_windows_amd64.syso`.
 - **Tests** (run from `tests/`): `python sim.py`, `python make_fixtures.py && python gui_e2e.py`, `python cli_e2e.py "whole folder"`. Use `QT_QPA_PLATFORM=offscreen` for headless runs.
   - Reference results: about 96–99% of lines within 0.3 s on simulated 45-minute episodes, about 80% fewer cut-off endings, zero new overlaps; on the synthesized-speech fixtures, every line is within 0.05 s.
-- **What can't be tested in a cloud/Linux session:** real Whisper or MiniLM inference (Hugging Face and python.org may be unreachable from the sandbox), NVIDIA GPU behaviour, and real Windows window behaviour. Wine plus a fake local download server works for testing the launcher. Be explicit with the owner about what was and wasn't tested.
-- **Dependencies:** pin them in `tools/make_manifest.py` inputs (pip `--report` for `win_amd64` / cp312, plus a folder with the CUDA wheels for the DLL sizes), regenerate `launcher/manifest.json`, then re-check lesson 5.
+- **Launcher tests:** `tests/launcher/run.sh` (about 5 min, 28 checks, needs wine + Xvfb + Go). Run it after any change in `launcher/`.
+- **What can't be tested in a cloud/Linux session:** real Whisper or MiniLM inference (Hugging Face and python.org may be unreachable from the sandbox), NVIDIA GPU behaviour, and real Windows window behaviour (Wine ignores the "start hidden" flag from lesson 1). Be explicit with the owner about what was and wasn't tested.
+- **Dependencies:** edit the pinned versions in `tools/requirements-windows.txt` / `tools/requirements-cuda.txt`, then run `tools/update_deps.sh`, which regenerates `launcher/manifest.json` (URLs, SHA-256, sizes, GPU DLL sizes). With unchanged pins it reproduces the shipped manifest exactly. Afterwards re-check lesson 3 (cuDNN must match ctranslate2's bundled shim) and lesson 5 (self-check against the real wheels), and run the launcher tests.
 - **Version number:** it lives in `launcher/cli.go` (`appVersionString`), `app/cli.py` (the report's `subsync_version`) and `launcher/app.rc` (VERSIONINFO, which still says 1.0.0; needs a `.syso` rebuild to change).
-- **Releases:** Claude sessions **cannot** create GitHub releases or push tags (GitHub refuses with 403). Prepare the release zip (`SubSync-vX.Y.Z-windows-x64.zip`: both exes, both READMEs, LICENSE), its SHA-256 and the release notes, then hand them to the owner with the web steps: Releases → Draft new release → create the tag on publish, targeting `main` → attach the zip → put the checksum in the description (the web upload rejects `.sha256` files). The README download link points at `releases/latest`.
+- **Releases:** Claude sessions **cannot** create GitHub releases or push tags (GitHub refuses with 403). Prepare the release zip (`SubSync-vX.Y.Z-windows-x64.zip`: both exes, both READMEs, LICENSE), its SHA-256 and the release notes, then hand them to the owner with the web steps: Releases → Draft new release → create the tag on publish, targeting `main` → attach the zip → put the checksum in the description too (one upload of the `.sha256` file was rejected by the web form; a retry worked). The README download link points at `releases/latest`. Add the version to `CHANGELOG.md` and update "Current status" above.
+- **Changing an existing release's tag:** GitHub won't delete a tag that a published release uses. The owner must delete the release first, then the tag, then recreate the release.
 
 ## Open items / ideas
 
@@ -87,3 +124,4 @@ tools/      make_manifest.py
 - The `app.rc` VERSIONINFO still says 1.0.0.
 - The exe is unsigned, so Windows SmartScreen shows "Windows protected your PC" (documented in the README).
 - GitHub's Contributors box briefly showed `claude` from the original commit's trailer (since removed); it's cached and clears by itself.
+- Possible future work, none of it requested yet: other subtitle languages, ASS output that keeps styling, a portable offline package for installs without internet.

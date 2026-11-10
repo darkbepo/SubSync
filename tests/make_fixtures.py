@@ -2,6 +2,8 @@
 and the transcript the fake worker returns in place of Whisper."""
 import os as _os, sys as _sys
 _REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+_os.chdir(_os.path.dirname(_os.path.abspath(__file__)))  # paths below are relative to tests/
+_os.makedirs("media", exist_ok=True)
 import json, random, subprocess, sys, wave, numpy as np
 sys.path.insert(0, _os.path.join(_REPO, "app"))
 from subsync.subtitles import Line, to_srt

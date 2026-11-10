@@ -1,0 +1,4 @@
+# NVIDIA libraries for ctranslate2's GPU path. cuDNN must match the cuDNN shim that ships
+# inside the ctranslate2 wheel EXACTLY (ctranslate2 4.8.5 -> 9.10.2.21); check this whenever
+# ctranslate2 changes (see CLAUDE.md, lesson 3). cuBLAS/NVRTC come in as its dependencies.
+nvidia-cudnn-cu12==9.10.2.21
