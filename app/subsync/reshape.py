@@ -19,7 +19,9 @@ MAX_CHARS = 2 * MAX_ROW
 STOP = {"a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "but", "with",
         "my", "your", "his", "its", "our", "their"}
 ABBREV = {"mr.", "mrs.", "ms.", "dr.", "st.", "jr.", "sr.", "vs.", "prof.", "sgt.", "lt.", "capt.",
-          "gen.", "det.", "no.", "mt.", "ft."}
+          "gen.", "det.", "mt.", "ft."}  # (not "no.": "No." is far more often a whole answer)
+LONG_PAUSE = 2.0     # seconds of silence that always end a subtitle
+REPLY_MAX_GAP = 1.5  # a short reply is only paired with a sentence spoken within this time
 _TAG = re.compile(r"<[^>]*>|\{[^}]*\}")
 _END = re.compile(r"[.?!…][\"'”’)\]]*$")
 _SOFT = re.compile(r"([,;:]|--|—)[\"'”’]*$")
@@ -50,6 +52,12 @@ def _ends_sentence(t: Tok, nxt: Tok | None) -> bool:
     if re.fullmatch(r"([a-zA-Z]\.){2,}", re.sub(r"[\"'”’)\]]+$", "", w)):  # dotted abbreviation "c.H.P."
         return nxt is None or _bare(nxt)[:1].isupper()
     return True
+
+
+def _dashed(toks: list[Tok]) -> bool:
+    """Starts with the captioner's own dialogue dash (a new speaker)."""
+    first = next((t for t in toks if t.kind != "tag"), None)
+    return first is not None and first.kind == "dash"
 
 
 def _words(toks: list[Tok]) -> list[Tok]:
@@ -185,7 +193,8 @@ def _upper_at(text: str, letter_positions: set[int]) -> str:
         if ch in "<{":
             in_tag = True
         if not in_tag and ch.isalpha():
-            out.append(ch.upper() if n in letter_positions else ch)
+            up = ch.upper()
+            out.append(up if n in letter_positions and len(up) == 1 else ch)  # "ﬁ".upper() is "FI"
             n += 1
         else:
             out.append(ch)
@@ -329,13 +338,21 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
     from .align import GAP, MIN_DURATION, SPEECH_TAIL, fix_endings
     from .subtitles import Line
 
-    has_words = {t.cue for t in toks if t.kind == "word"}
-    standalone = [k for k in range(len(orig)) if k not in has_words]
     # position tags ({\an8}) belong to the whole original cue
     pos_tags: dict[int, list[Tok]] = {}
     for t in toks:
-        if t.kind == "tag" and t.text.startswith("{") and t.cue in has_words:
+        if t.kind == "tag" and t.text.startswith("{"):
             pos_tags.setdefault(t.cue, []).append(t)
+    # a cue the original deliberately overlaps with its neighbour (a sign placed at the top,
+    # over dialogue) stays as it is; the dialogue is re-cut as usual
+    from .words import deliberate_overlap, placed
+
+    kept = set()
+    for k in range(len(orig) - 1):
+        if deliberate_overlap(orig, k):
+            kept.add(k if placed(orig[k]) else k + 1)
+    has_words = {t.cue for t in toks if t.kind == "word"} - kept
+    standalone = [k for k in range(len(orig)) if k not in has_words]
     capitals = fix_case(toks, words, match)  # match keys are indexes into toks
     stream = [t for t in toks if t.cue in has_words and not (t.kind == "tag" and t.text.startswith("{"))]
     # a sound description that ends its original cue belongs to the sentence before it
@@ -345,9 +362,29 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
             last_real[t.cue] = k
     back = {id(stream[k]) for k in last_real.values() if stream[k].kind == "sound"}
 
-    sents = sentences(stream)
+    # hard boundaries: a cue kept on its own in between, a change of screen position, a long pause
+    std = set(standalone)
+    segments: list[list[Tok]] = [[]]
+    prev_t, prev_end = None, None
+    for t in stream:
+        cut = False
+        if prev_t is not None and t.cue != prev_t.cue:
+            if any(c in std for c in range(prev_t.cue + 1, t.cue)):
+                cut = True
+            if [x.text for x in pos_tags.get(t.cue, [])] != [x.text for x in pos_tags.get(prev_t.cue, [])]:
+                cut = True
+        if t.kind == "word" and prev_end is not None and t.start - prev_end >= LONG_PAUSE:
+            cut = True
+        if cut and any(x.kind == "word" for x in segments[-1]):
+            segments.append([])
+        segments[-1].append(t)
+        prev_t = t
+        if t.kind == "word":
+            prev_end = t.end
+    sents = [(n, s) for n, seg in enumerate(segments) for s in sentences(seg)]
     fixed: list[list[Tok]] = []
-    for s in sents:
+    fixed_seg: list[int] = []
+    for n, s in sents:
         lead = []
         while s and (id(s[0]) in back or (s[0].kind == "tag" and _CLOSE.fullmatch(s[0].text))):
             lead.append(s.pop(0))
@@ -359,10 +396,14 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
             fixed[-1].extend(s)
         elif s:
             fixed.append(s)
+            fixed_seg.append(n)
 
     pieces: list[list[Tok]] = []
-    for s in fixed:
-        pieces.extend(split_long(s))
+    seg_of: list[int] = []  # pieces are only ever combined within one segment
+    for s, n in zip(fixed, fixed_seg):
+        for piece in split_long(s):
+            pieces.append(piece)
+            seg_of.append(n)
 
     # short replies: combine with a neighbour so they don't flash by
     def span(p):
@@ -370,27 +411,32 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
         return ws[0].start, ws[-1].end
 
     cues: list[tuple[list[Tok], tuple | None]] = []  # (tokens, (a, b) if dashed)
+    cue_seg: list[int] = []
     k = 0
     while k < len(pieces):
         p = pieces[k]
         s, e = span(p)
-        if e - s + SPEECH_TAIL < MIN_DURATION and k + 1 < len(pieces):
+        if e - s + SPEECH_TAIL < MIN_DURATION and k + 1 < len(pieces) and seg_of[k + 1] == seg_of[k]:
             q = pieces[k + 1]
             qs, qe = span(q)
-            if qe - s <= MAX_DURATION:
-                # a pause and a new caption row (captioners start one per speaker) = a reply
+            if qe - s <= MAX_DURATION and qs - e <= REPLY_MAX_GAP:
+                # the captioner's own dash, or a pause plus a new caption row = a reply
                 lp, fq = _last_word(p), _first_word(q)
                 new_row = (lp.cue, lp.row) != (fq.cue, fq.row)
-                if qs - e >= 0.5 and new_row:  # one row each, with its "- "
-                    if visible_len(p) + 2 <= MAX_ROW and visible_len(q) + 2 <= MAX_ROW:
+                fits_dashed = visible_len(p) + 2 <= MAX_ROW and visible_len(q) + 2 <= MAX_ROW
+                if _dashed(q) or (qs - e >= 0.5 and new_row):  # one row each, with its "- "
+                    if fits_dashed:
                         cues.append((p + q, (p, q)))
+                        cue_seg.append(seg_of[k])
                         k += 2
                         continue
                 elif _can_wrap(p + q):  # same speaker, no pause
                     cues.append((p + q, None))
+                    cue_seg.append(seg_of[k])
                     k += 2
                     continue
-        if e - s + SPEECH_TAIL < MIN_DURATION and cues and cues[-1][1] is None:
+        if (e - s + SPEECH_TAIL < MIN_DURATION and cues and cues[-1][1] is None and not _dashed(p)
+                and cue_seg[-1] == seg_of[k]):
             prev = cues[-1][0]
             ps, _ = span(prev)
             if _can_wrap(prev + p) and e - ps <= MAX_DURATION and s - span(prev)[1] < 0.5:
@@ -398,6 +444,7 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
                 k += 1
                 continue
         cues.append((p, None))
+        cue_seg.append(seg_of[k])
         k += 1
 
     bal = _balance_tags([c[0] for c in cues])
@@ -414,14 +461,17 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
         s, e = span(toks_c)
         built.append({"line": Line(s, e, text), "speech_end": e, "from": src})
     for k in standalone:
-        built.append({"line": Line(rough[k].start, rough[k].end, orig[k].text), "speech_end": None, "from": [k]})
+        parts, _ = split_tall([Line(rough[k].start, rough[k].end, orig[k].text)])  # still at most 2 rows
+        for part in parts:
+            built.append({"line": part, "speech_end": None, "from": [k], "overlap": k in kept})
     # file order; a sound-only cue goes before the re-cut cue made from the cues after it
     built.sort(key=lambda b: (b["from"][0], b["speech_end"] is not None))
     new = [b["line"] for b in built]
     speech_end = {k: b["speech_end"] for k, b in enumerate(built) if b["speech_end"] is not None}
+    overlap = {k for k, b in enumerate(built) if b.get("overlap")}
     # starts strictly increasing: word-timed cues stay put, sound-only cues give way
     for k in range(1, len(new)):
-        if new[k].start >= new[k - 1].start + 0.05:
+        if new[k].start >= new[k - 1].start + 0.05 or k in overlap or k - 1 in overlap:
             continue
         if k not in speech_end:                       # this one is a sound-only cue: move it later
             new[k].start = new[k - 1].start + 0.05
@@ -429,6 +479,8 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
             floor = new[k - 2].start + 0.05 if k >= 2 else 0.0
             new[k - 1].start = max(floor, new[k].start - 0.5)
     for k in range(len(new) - 1):
+        if k in overlap or k + 1 in overlap:  # an overlap the original wanted stays
+            continue
         a, b = new[k], new[k + 1]
         if a.end > b.start - GAP:
             a.end = max(a.start + 0.05, b.start - GAP)

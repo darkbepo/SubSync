@@ -249,6 +249,23 @@ def match_words(toks: list[Tok], words: list[tuple[float, float, str]], rough: l
 
 
 # ------------------------------------------------------------------ retiming
+_POS = re.compile(r"\{\\an?\d+\}|\{[^}]*\\pos\(")
+
+
+def deliberate_overlap(orig: list[Line], k: int) -> bool:
+    """Cue k and k+1 overlap on purpose: exactly one of them is placed elsewhere on screen
+    ({\\an8}, \\pos), e.g. a sign over dialogue. Other overlaps are usually timing mistakes."""
+    a, b = orig[k], orig[k + 1]
+    if a.end <= b.start + 0.05 or b.start < a.start:
+        return False
+    return bool(_POS.search(a.text)) != bool(_POS.search(b.text))
+
+
+def placed(line: Line) -> bool:
+    return bool(_POS.search(line.text))
+
+
+
 def cue_words(toks: list[Tok]) -> dict[int, list[Tok]]:
     out: dict[int, list[Tok]] = {}
     for t in toks:
@@ -283,9 +300,11 @@ def refine(orig: list[Line], rough: list[Line], toks: list[Tok]) -> tuple[list[L
         new[k].start = start
         new[k].end = max(start + dur, start + 0.5)
         prev_start = start
-    # moving a start must not make a cue run over the next one
+    # moving a start must not make a cue run over the next one (overlaps the original had stay)
     for k in range(len(new) - 1):
         a, b = new[k], new[k + 1]
+        if deliberate_overlap(orig, k):
+            continue
         if b.start > a.start and a.end > b.start - GAP:
             a.end = max(b.start - GAP, a.start + 0.3)
             if a.end > b.start:

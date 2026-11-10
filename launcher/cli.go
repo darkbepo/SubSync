@@ -47,7 +47,7 @@ Sync options:
   --suffix en|eng         name results <video>.en.srt (default) or <video>.eng.srt
   --overwrite             replace an existing result; without it a new file <video>.en.#1.srt is written
   --keep-layout           keep the original line layout and capitals (timing is still fixed)
-  --cpu                  don't use the NVIDIA GPU
+  --cpu                   don't use the NVIDIA GPU
   --report FILE.json      write a machine-readable report of every pair
 
 Exit codes:

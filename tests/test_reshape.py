@@ -114,6 +114,52 @@ class ReshapeTests(unittest.TestCase):
                         "Thanks.@10.0 You're@11.0 welcome.@11.3")
         self.assertEqual([l.text for l in new], ["- Thanks.\n- You're welcome."])
 
+    def test_no_ends_sentence(self):
+        new, _, _ = run([Line(0.0, 1.5, "- Yes.\n- No."), Line(5.0, 7.0, "alpha beta gamma delta.")],
+                        "Yes.@0.1 No.@0.8 alpha@5.0 beta@5.3 gamma@5.6 delta.@5.9")
+        later = next(l for l in new if "lpha" in l.text)
+        self.assertTrue(later.text.startswith("Alpha"), later.text)
+        self.assertGreaterEqual(later.start, 4.9)
+
+    def test_reply_not_paired_across_long_pause(self):
+        new, _, _ = run([Line(0.0, 1.0, "Hi."), Line(5.5, 7.0, "There you are.")],
+                        "Hi.@0.1 There@5.6 you@5.9 are.@6.1")
+        self.assertEqual(len(new), 2, [l.text for l in new])
+        self.assertAlmostEqual(new[1].start, 5.6, delta=0.01)
+
+    def test_sentence_breaks_at_long_pause(self):
+        new, _, _ = run([Line(0.0, 1.0, "alpha beta"), Line(4.0, 5.0, "gamma delta.")],
+                        "alpha@0.1 beta@0.4 gamma@4.0 delta.@4.3")
+        self.assertEqual(len(new), 2, [l.text for l in new])
+        self.assertAlmostEqual(new[1].start, 4.0, delta=0.01)
+
+    def test_original_dashes_kept(self):
+        new, _, _ = run([Line(0.0, 1.0, "- Yes.\n- No.")], "Yes.@0.1 No.@0.4")
+        self.assertEqual([l.text for l in new], ["- Yes.\n- No."])
+
+    def test_sound_cue_inside_sentence_is_a_boundary(self):
+        new, _, _ = run([Line(0.0, 1.0, "alpha beta gamma"), Line(2.1, 3.5, "(Music)"), Line(3.6, 4.6, "delta epsilon.")],
+                        "alpha@0.1 beta@0.4 gamma@0.7 delta@3.7 epsilon.@4.1")
+        texts = [l.text for l in new]
+        self.assertEqual(texts[1], "(Music)", texts)
+        last = new[-1]
+        self.assertIn("epsilon.", last.text)
+        self.assertAlmostEqual(last.start, 3.7, delta=0.01)
+
+    def test_overlapping_sign_kept_apart(self):
+        new, _, _ = run([Line(10.0, 14.0, "{\\an8}SIGN ON WALL"), Line(10.5, 12.0, "alpha beta gamma.")],
+                        "alpha@10.5 beta@10.8 gamma.@11.1")
+        self.assertIn(("{\\an8}SIGN ON WALL", 10.0, 14.0), [(l.text, l.start, l.end) for l in new])
+        dialogue = next(l for l in new if "gamma" in l.text)
+        self.assertNotIn("{\\an8}", dialogue.text)
+
+    def test_position_tag_not_spread_to_neighbour(self):
+        new, _, _ = run([Line(1.0, 2.0, "{\\an8}alpha beta"), Line(2.0, 3.0, "gamma delta.")],
+                        "alpha@1.0 beta@1.3 gamma@2.0 delta.@2.3")
+        for l in new:
+            if "gamma" in l.text:
+                self.assertNotIn("{\\an8}", l.text)
+
     def test_pause_on_same_row_not_dashed(self):
         # one speaker pausing: both sentences were on one caption row, so no dashes
         new, _, _ = run([Line(539.0, 542.0, "Hmm. Let me see.")], "Hmm.@539.28 Let@540.48 me@540.72 see.@540.86")
@@ -215,6 +261,10 @@ class CaseTests(unittest.TestCase):
     def test_case_never_lowers(self):
         text, _ = cased([Line(1, 2, "NO WAY!")], "No@1.0 way!@1.3")
         self.assertEqual(text, "NO WAY!")
+
+    def test_case_ligature_no_crash(self):
+        text, _ = cased([Line(1, 2, "ﬁne then.")], "fine@1.0 then.@1.3")
+        self.assertEqual(text.lower(), "ﬁne then.")
 
     def test_case_returns_count(self):
         _, n = cased([Line(1, 3, "Well, i know i'm late.")], "Well,@1.0 I@1.3 know@1.5 I'm@1.8 late.@2.1")

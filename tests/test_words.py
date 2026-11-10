@@ -196,6 +196,11 @@ class RefineTests(unittest.TestCase):
         self.assertEqual(new[1].start, 9.5)  # kept its rough start
         self.assertGreaterEqual(new[2].start, max(new[0].start, new[1].start) + 0.05)
 
+    def test_refine_keeps_original_overlap(self):
+        cues = [Line(10.0, 14.0, "{\\an8}SIGN ON WALL"), Line(10.5, 12.0, "alpha beta gamma.")]
+        new, _, _ = _refine(cues, "alpha@10.5 beta@10.8 gamma.@11.1")
+        self.assertEqual((new[0].start, new[0].end), (10.0, 14.0))
+
     def test_refine_unmatched_keeps_rough(self):
         cues = [Line(1.0, 3.0, "Hello there."), Line(4.0, 6.0, "zzzq qqqz"), Line(7.0, 9.0, "Bye now.")]
         new, speech_end, n = _refine(cues, "Hello@1.2 there.@1.5 Bye@7.1 now.@7.4")
