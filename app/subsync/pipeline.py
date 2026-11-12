@@ -287,23 +287,24 @@ class Engine:
         self.req_q.put({"id": job["id"], "path": job["video"], "audio_n": job["audio_n"], "lang": job["lang"]})
 
     # ------------------------------------------------------------ public
-    def submit(self, jid: int, video: str, sub: str):
+    def submit(self, jid: int, video: str, sub: str, out: str | None = None):
+        """out: write the result exactly there (replacing a file that exists) instead of next to the video."""
         self.emit(jid, "stage", "Queued")
-        self.submit_q.put((jid, video, sub))
+        self.submit_q.put((jid, video, sub, out))
 
     def _submit_loop(self):
         while True:
-            jid, video, sub = self.submit_q.get()
+            jid, video, sub, out = self.submit_q.get()
             if jid in self._dropped:
                 continue
-            self._submit(jid, video, sub)
+            self._submit(jid, video, sub, out)
 
-    def _submit(self, jid, video, sub):
+    def _submit(self, jid, video, sub, out=None):
         try:
             from .media import pick_audio_stream
 
             audio_n, lang, dur = pick_audio_stream(video)
-            job = {"id": jid, "video": video, "sub": sub, "audio_n": audio_n, "lang": lang,
+            job = {"id": jid, "video": video, "sub": sub, "out": out, "audio_n": audio_n, "lang": lang,
                    "cache": _cache_file(video, audio_n), "t0": time.time(), "dur": dur}
             if os.path.exists(job["cache"]):
                 try:
@@ -378,7 +379,7 @@ class Engine:
                 if not res.ok:
                     self.emit(jid, "warning", {"text": res.reason, "lang": lang})
                     continue
-                out = output_path(job["video"], s.get("suffix", ".en"), bool(s.get("overwrite", False)))
+                out = job.get("out") or output_path(job["video"], s.get("suffix", ".en"), bool(s.get("overwrite", False)))
                 self._write(jid, out, subtitles.to_srt(p.lines))
                 try:
                     details.write(job["video"], p.details)

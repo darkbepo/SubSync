@@ -45,6 +45,8 @@ D:\Tools\SubSync\subsync-cli.exe .
 | `--keep-layout` | Turn *Tidy up lines* off: keep the original line layout and capitals. The timing is still fixed line by line. (The window's setting does not affect the command line; tidying is on unless this option is given.) |
 | `--cpu` | Don't use the NVIDIA GPU (slower; for testing, or if the GPU is busy). |
 | `--report FILE.json` | Write a machine-readable report (format below). |
+| `--output FILE.srt` | (Since 1.3.0.) Write the result to exactly this file instead of `<video>.en.srt`. Only with exactly one `--pair` and no other files or folders; `--suffix` is then not used. If the file exists, `--overwrite` is required (otherwise exit code 6, before any work). It may be the input subtitle itself, which is then replaced in place. |
+| `--progress` | (Since 1.3.0.) Print machine-readable progress lines on stdout, for programs that run SubSync (see [Progress lines](#progress-lines---progress)). The live status line is not shown. |
 
 Supported inputs: videos `.mkv .mp4 .m4v .avi .mov .wmv .ts .m2ts .mts .webm .flv .mpg .mpeg .vob .ogm`; subtitles `.srt .ass .ssa .vtt` (English). Results are always `.srt` (UTF-8), written **next to the video**.
 
@@ -131,6 +133,27 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 `status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones.
 
 `speech_recognition` (since 1.3.0) says what listened: `device` is `gpu` or `cpu` (a GPU problem during the run switches to `cpu`, and the report says so), `name` is the graphics card, `model_load_seconds` how long the speech model took to load. It is `null` when nothing had to be listened to, for example when every transcript came from the cache. `timings` (since 1.3.0, synced items) gives the seconds spent reading the audio, listening and matching; `from_cache: true` means the transcript was remembered from an earlier run, so `read_audio` and `listen` are `null`.
+
+## Progress lines (`--progress`)
+
+Each line starts with `PROGRESS ` followed by one JSON object (plain ASCII, one line, flushed immediately). All other lines on stdout are the usual human-readable ones, so a program can pick out its lines by the prefix:
+
+```
+PROGRESS {"event":"stage","item":1,"total":1,"stage":"queued","percent":null}
+PROGRESS {"event":"device","device":"gpu","name":"NVIDIA GeForce RTX 3050"}
+PROGRESS {"event":"stage","item":1,"total":1,"stage":"reading_audio","percent":null}
+PROGRESS {"event":"stage","item":1,"total":1,"stage":"listening","percent":37}
+PROGRESS {"event":"stage","item":1,"total":1,"stage":"matching","percent":50}
+PROGRESS {"event":"item_done","item":1,"total":1,"status":"synced","output":"D:\\Shows\\Show.S01E01.en.srt"}
+```
+
+| Event | Fields |
+|---|---|
+| `stage` | `item` (number in the listing printed at the start, 1-based), `total`, `stage`, `percent` (0–100 within that stage, or `null` when the stage has just started or has no measure). |
+| `device` | Speech recognition is ready: `device` `gpu` or `cpu`, `name` the graphics card (or `null`). Comes again if a GPU problem switches to the CPU. |
+| `item_done` | `item`, `total`, `status` (`synced`, `no_match`, `failed`, `cancelled`, as in the report) and `output` (the written file, or `null`). |
+
+Stages in order: `queued`, `reading_audio`, `listening` (nearly all of the time; `percent` is how much of the soundtrack has been heard, updated every 15 seconds of audio or so), `matching`, and rarely `waiting_for_file` (the existing result is open in another program). With several items, the next item's `reading_audio` starts while the current one is still `listening`. A transcript from the cache goes straight from `queued` to `matching`. New events and fields may be added later; ignore what you don't know.
 
 ## Logs
 

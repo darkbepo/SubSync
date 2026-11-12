@@ -9,6 +9,8 @@ Faster starts; the results and the matching are unchanged.
 - **The command line starts loading both models before it scans the folders.**
 - **Setup prepares Python's ready-to-run files** (`.pyc`) for the libraries, so the first start after installing doesn't have to.
 - **Timings in the logs.** `logs\app.log` shows each start-up step with the seconds since start; `logs\setup.log` gets one line per start ("self-check … ms, window open after … s"); `logs\worker.log` and `logs\cli.log` say how long the speech model took to load; `cli.log` gets each item's read-audio / listen / match seconds.
+- **Command line `--output FILE.srt`:** with exactly one `--pair`, write the result to that file (for example the input subtitle itself, or a name like `.en.hi.srt`).
+- **Command line `--progress`:** machine-readable `PROGRESS {json}` lines on stdout (stage, percent, GPU/CPU, item finished) for programs that run SubSync, such as the Jellyfin plugin.
 - **JSON report:** new `speech_recognition` (GPU or CPU, card name, model load seconds) and, per synced item, `timings`.
 
 ## 1.2.0

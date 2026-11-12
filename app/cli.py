@@ -54,6 +54,8 @@ def parse(argv):
     p.add_argument("--keep-layout", action="store_true")  # turn "Tidy up lines" off
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--report", metavar="FILE.json")
+    p.add_argument("--output", metavar="FILE.srt")  # with exactly one --pair: write the result there
+    p.add_argument("--progress", action="store_true")  # machine-readable PROGRESS lines on stdout
     p.add_argument("-h", "--help", action="store_true")
     return p.parse_args(argv)
 
@@ -78,6 +80,21 @@ def timings(data) -> dict:
     r = lambda x: round(x, 1) if isinstance(x, (int, float)) else None
     return {"from_cache": bool(st.get("cached")), "read_audio": r(st.get("decode_s")),
             "listen": r(st.get("asr_s")), "match": r(data.get("align_s"))}
+
+
+# --progress: stage codes for the engine's stage texts (stable; scripts depend on them)
+STAGES = {"Queued": "queued", "Reading audio…": "reading_audio", "Listening…": "listening",
+          "Matching lines…": "matching"}
+
+
+def stage_code(text: str) -> str:
+    return STAGES.get(text) or ("waiting_for_file" if text.startswith("Waiting") else "working")
+
+
+def progress_line(obj: dict) -> None:
+    """One machine-readable line: PROGRESS {json}. Plain ASCII, flushed at once."""
+    sys.stdout.write("PROGRESS " + json.dumps(obj, ensure_ascii=True, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
 
 
 def fmt_secs(s):
@@ -111,6 +128,24 @@ def main(argv):
                 return EXIT_USAGE
         rows.append((v, s))
         used.update((v, s))
+    output = None
+    if args.output:
+        output = os.path.abspath(args.output)
+        problem = None
+        if len(args.pair) != 1 or args.paths:
+            problem = "--output needs exactly one --pair and no other files or folders"
+        elif os.path.splitext(output)[1].lower() != ".srt":
+            problem = "--output must be a .srt file"
+        elif not os.path.isdir(os.path.dirname(output)):
+            problem = f"--output folder not found: {os.path.dirname(output)}"
+        elif os.path.isdir(output):
+            problem = f"--output is a folder: {output}"
+        elif os.path.exists(output) and not args.overwrite:
+            problem = f"--output exists: {output} (add --overwrite to replace it)"
+        if problem:
+            print(f"Error: {problem}", file=sys.__stderr__)
+            log(f"usage error: {problem}")
+            return EXIT_USAGE
     missing = [p for p in args.paths if not os.path.exists(p)]
     if missing:
         print("Error: not found: " + ", ".join(missing), file=sys.__stderr__)
@@ -158,13 +193,14 @@ def main(argv):
         jobs[n] = {"video": v, "subtitle": s, "status": "pending", "n": n}
     speech = {}
     for n, j in jobs.items():
-        engine.submit(n, j["video"], j["subtitle"])
+        engine.submit(n, j["video"], j["subtitle"], output)
 
-    tty = sys.stdout.isatty()
+    tty = sys.stdout.isatty() and not args.progress  # no live status line between PROGRESS lines
     total = len(jobs)
     finished = 0
     current = {}
     last_line = ""
+    shown = {}  # --progress: last (stage, percent) printed per item
 
     def status_line():
         nonlocal last_line
@@ -202,6 +238,8 @@ def main(argv):
                         log(f"speech model ready after {time.time() - t_start:.1f} s"
                             + (f" (worker {data['load_s']:.1f} s)" if data.get("load_s") is not None else ""))
                         clear_line()
+                        if args.progress:
+                            progress_line({"event": "device", "device": speech["device"], "name": speech["name"]})
                         out("Speech recognition: " + (f"GPU ({data['name']})" if data["device"] == "cuda"
                                                       else "CPU (no usable NVIDIA GPU – slower)"))
                     elif st == "error":
@@ -219,9 +257,19 @@ def main(argv):
                 current[jid] = (jid, data, 0.0)
                 if not tty and data not in ("Queued",):
                     log(f"[{jid}/{total}] {os.path.basename(j['video'])}: {data}")
+                if args.progress:
+                    shown[jid] = (stage_code(data), None)
+                    progress_line({"event": "stage", "item": jid, "total": total, "stage": shown[jid][0],
+                                   "percent": None})
             elif kind == "progress":
                 n_, text, _ = current.get(jid, (jid, "", 0.0))
                 current[jid] = (jid, text, float(data))
+                if args.progress:
+                    code = stage_code(text)
+                    pct = max(0, min(100, int(float(data) * 100)))
+                    if shown.get(jid) != (code, pct):
+                        shown[jid] = (code, pct)
+                        progress_line({"event": "stage", "item": jid, "total": total, "stage": code, "percent": pct})
             elif kind in ("done", "warning", "error", "cancelled"):
                 current.pop(jid, None)
                 finished += 1
@@ -249,6 +297,9 @@ def main(argv):
                     reason = data["text"] if isinstance(data, dict) else str(data)
                     j.update(status="failed" if kind == "error" else "cancelled", reason=reason)
                     out(f"FAIL {tag} {name}: {reason}")
+                if args.progress:
+                    progress_line({"event": "item_done", "item": jid, "total": total, "status": j["status"],
+                                   "output": j.get("output")})
     except KeyboardInterrupt:
         clear_line()
         out("Stopped (Ctrl+C).")

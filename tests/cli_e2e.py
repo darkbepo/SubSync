@@ -31,10 +31,19 @@ if __name__ == "__main__":
         "missing path":            [W + "/nope.mkv"],
         "bad option":              [W, "--suffix", "de"],
         "keep layout":             [W, "--keep-layout", "--overwrite", "--report", W + "/r4.json"],
+        "progress + output":       ["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.en.srt", "--output",
+                                    W + "/out/custom.srt", "--progress", "--report", W + "/r5.json"],
+        "output in place":         ["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.en.srt", "--output",
+                                    W + "/Show.S01E01.en.srt", "--overwrite"],
+        "output exists":           ["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.en.srt", "--output",
+                                    W + "/Show.S01E01.en.srt"],
+        "output with folder":      [W, "--output", W + "/x.srt"],
+        "output not srt":          ["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.en.srt", "--output", W + "/x.txt"],
     }
     which = sys.argv[1]
+    os.makedirs(W + "/out", exist_ok=True)
     code = cli.main(cases[which])
     print(f"EXIT {code}")
-    for r in ("r1", "r3", "r4"):
+    for r in ("r1", "r3", "r4", "r5"):
         if os.path.exists(f"{W}/{r}.json"): print(open(f"{W}/{r}.json").read()[:900])
     os._exit(code)

@@ -49,6 +49,9 @@ Sync options:
   --keep-layout           keep the original line layout and capitals (timing is still fixed)
   --cpu                   don't use the NVIDIA GPU
   --report FILE.json      write a machine-readable report of every pair
+  --output FILE.srt       with exactly one --pair: write the result to this file
+                          (needs --overwrite if it exists; --suffix is then not used)
+  --progress              print machine-readable progress lines (PROGRESS {json}), see README-CLI.md
 
 Exit codes:
   0  every pair was synced
