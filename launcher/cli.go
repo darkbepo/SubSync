@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const appVersionString = "1.4.1"
+const appVersionString = "1.5.0"
 
 // Exit codes (also documented in README-CLI.md and app/subsync/cli.py).
 const (
@@ -48,7 +48,7 @@ Usage:
 
 Sync options:
   --pair VIDEO SUBTITLE   sync this exact pair (can be repeated); other paths are paired automatically
-  --suffix en|eng         name results <video>.en.srt (default) or <video>.eng.srt
+  --suffix en|eng         name results <video>.en.srt (default) or <video>.eng.srt (.da / .dan for Danish)
   --overwrite             replace an existing result; without it a new file <video>.en.#1.srt is written
   --keep-layout           keep the original line layout and capitals (timing is still fixed)
   --cpu                   don't use the NVIDIA GPU
@@ -56,6 +56,8 @@ Sync options:
   --output FILE.srt       with exactly one --pair: write the result to this file
                           (needs --overwrite if it exists; --suffix is then not used)
   --progress              print machine-readable progress lines (PROGRESS {json}), see README-CLI.md
+  --sub-lang auto|en|da   the subtitles' language (default auto: from the name, else the text)
+  --reference EN.srt      with one --pair of a Danish subtitle: English subtitle to take the timing from
 
 Detect options:
   --track N               check audio track N (1 = first); default: the track sync would use

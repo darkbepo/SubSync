@@ -45,19 +45,47 @@ class Processed:
     details: list = field(default_factory=list)
 
 
-def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> Processed:
-    """Rough alignment; then, for English audio, word-accurate timing and (tidy) re-cutting;
-    for other audio, (tidy) only cues taller than two rows are split."""
+def _from_reference(lines, reference, words, lang, embed, sub_lang, progress):
+    """Time a subtitle in another language by an English subtitle of the same video (1.5.0):
+    the English one is synced first (word-accurate on English audio), then each line is matched
+    to the English line(s) saying the same thing (multilingual embeddings) and takes their
+    timing. None if the English one can't be synced or too few lines match."""
+    from .align import Phrase, align
+    from .subtitles import Line, speech_text
+
+    rp = process([Line(l.start, l.end, l.text) for l in reference], words, lang, embed, tidy=False,
+                 progress=lambda f: progress(0.5 * f))
+    if not rp.res.ok or len(rp.lines) != len(reference):
+        return None
+    phrases = [Phrase(n.start, n.end, speech_text(o.text)) for o, n in zip(reference, rp.lines) if speech_text(o.text)]
+    res = align(lines, words, "en", embed, sub_lang, progress=lambda f: progress(0.5 + 0.5 * f), phrases=phrases)
+    return res if res.ok else None
+
+
+def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None,
+            sub_lang: str = "en", reference=None) -> Processed:
+    """Rough alignment; then, for an English subtitle on English audio, word-accurate timing and
+    (tidy) re-cutting; otherwise (tidy) only cues taller than two rows are split.
+    sub_lang (1.5.0): the subtitle's language. A non-English subtitle is timed by `reference`
+    (the lines of an English subtitle of the same video) when given and usable, otherwise by
+    the audio (the same phrase-level matching as for English subtitles on other-language audio)."""
     from . import reshape as R
     from . import words as W
     from .align import align, keep_visible
 
-    res = align(lines, words, lang, embed, "en", progress=progress)
+    timing_from = "audio"
+    res = None
+    if sub_lang != "en" and reference:
+        res = _from_reference(lines, reference, words, lang, embed, sub_lang, progress)
+        if res is not None:
+            timing_from = "reference"
+    if res is None:
+        res = align(lines, words, lang, embed, sub_lang, progress=progress)
     stats = {"tidy": bool(tidy), "word_timed": 0, "subtitles_before": len(lines), "subtitles_after": len(lines),
-             "joined": 0, "split": 0, "capitals_fixed": 0}
+             "joined": 0, "split": 0, "capitals_fixed": 0, "sub_lang": sub_lang, "timing_from": timing_from}
     if not res.ok:
         return Processed(res, lines, stats, [])
-    english = (lang or "").split("-")[0] == "en"
+    english = (lang or "").split("-")[0] == "en" and sub_lang == "en"  # word matching: same language
     counts: dict = {}
     timed: set = set()
     if english:
@@ -292,25 +320,28 @@ class Engine:
         self.req_q.put({"id": job["id"], "path": job["video"], "audio_n": job["audio_n"], "lang": job["lang"]})
 
     # ------------------------------------------------------------ public
-    def submit(self, jid: int, video: str, sub: str, out: str | None = None):
-        """out: write the result exactly there (replacing a file that exists) instead of next to the video."""
+    def submit(self, jid: int, video: str, sub: str, out: str | None = None,
+               sub_lang: str | None = None, reference: str | None = None):
+        """out: write the result exactly there (replacing a file that exists) instead of next to the video.
+        sub_lang: the subtitle's language ('en' / 'da'; None = from its name or text).
+        reference: an English subtitle of the same video, to time a Danish one by (1.5.0)."""
         self.emit(jid, "stage", "Queued")
-        self.submit_q.put((jid, video, sub, out))
+        self.submit_q.put((jid, video, sub, out, {"sub_lang": sub_lang, "reference": reference}))
 
     def _submit_loop(self):
         while True:
-            jid, video, sub, out = self.submit_q.get()
+            jid, video, sub, out, opts = self.submit_q.get()
             if jid in self._dropped:
                 continue
-            self._submit(jid, video, sub, out)
+            self._submit(jid, video, sub, out, opts)
 
-    def _submit(self, jid, video, sub, out=None):
+    def _submit(self, jid, video, sub, out=None, opts=None):
         try:
             from .media import pick_audio_stream
 
             audio_n, lang, dur = pick_audio_stream(video)
             job = {"id": jid, "video": video, "sub": sub, "out": out, "audio_n": audio_n, "lang": lang,
-                   "cache": _cache_file(video, audio_n), "t0": time.time(), "dur": dur}
+                   "cache": _cache_file(video, audio_n), "t0": time.time(), "dur": dur, **(opts or {})}
             if os.path.exists(job["cache"]):
                 try:
                     with gzip.open(job["cache"], "rt", encoding="utf-8") as f:
@@ -375,16 +406,29 @@ class Engine:
                 embedder = self._get_embedder()
                 from . import details, subtitles
 
+                from . import language
+
                 lines = subtitles.load(job["sub"])
+                sub_lang = language.resolve(job["sub"], lines, job.get("sub_lang"))
+                ref = None
+                if sub_lang != "en" and job.get("reference"):
+                    try:
+                        ref = subtitles.load(job["reference"])
+                        if language.resolve(job["reference"], ref) != "en":  # only an English one can time it
+                            print(f"reference subtitle is not English: {job['reference']}")
+                            ref = None
+                    except Exception as e:  # time it from the audio instead
+                        print(f"reference subtitle not readable: {e}")
                 t0 = time.time()
                 s = self.get_settings()
                 p = process(lines, words, lang, embedder, bool(s.get("tidy", True)),
-                            progress=lambda f: self.emit(jid, "progress", f))
+                            progress=lambda f: self.emit(jid, "progress", f), sub_lang=sub_lang, reference=ref)
                 res = p.res
                 if not res.ok:
-                    self.emit(jid, "warning", {"text": res.reason, "lang": lang})
+                    self.emit(jid, "warning", {"text": res.reason, "lang": lang, "sub_lang": sub_lang})
                     continue
-                out = job.get("out") or output_path(job["video"], s.get("suffix", ".en"), bool(s.get("overwrite", False)))
+                out = job.get("out") or output_path(job["video"], language.suffix(sub_lang, s.get("suffix", ".en")),
+                                                    bool(s.get("overwrite", False)))
                 self._write(jid, out, subtitles.to_srt(p.lines))
                 try:
                     details.write(job["video"], p.details)
@@ -393,6 +437,8 @@ class Engine:
                 self.emit(jid, "done", {
                     "tidy": p.stats,
                     "out": out, "matched": res.matched, "total": res.total_speech, "lang": lang,
+                    "sub_lang": sub_lang, "timing_from": p.stats.get("timing_from", "audio"),
+                    "reference": job.get("reference") if p.stats.get("timing_from") == "reference" else None,
                     "ends": (res.ends_speech, res.ends_read, res.ends_limited),
                     "runs": res.runs, "offsets": (min(res.offsets), max(res.offsets)) if res.offsets else (0, 0),
                     "seconds": time.time() - job["t0"], "align_s": time.time() - t0,

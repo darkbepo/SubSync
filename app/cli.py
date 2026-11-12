@@ -2,7 +2,7 @@
 
     subsync-cli sync <files or folders...> [--pair VIDEO SUBTITLE] [--suffix en|eng]
                      [--overwrite] [--keep-layout] [--cpu] [--report FILE.json]
-                     [--output FILE.srt] [--progress]
+                     [--output FILE.srt] [--progress] [--sub-lang auto|en|da] [--reference EN.srt]
     subsync-cli serve [--suffix en|eng] [--overwrite] [--keep-layout] [--cpu]
 
 Exit codes: see EXIT_* below and README-CLI.md.
@@ -18,7 +18,7 @@ import time
 import traceback
 
 T_PROCESS = time.time()  # detect's "seconds" counts from here
-VERSION = "1.4.1"  # also in launcher/cli.go
+VERSION = "1.5.0"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video
@@ -62,6 +62,8 @@ def parse(argv):
     p.add_argument("--report", metavar="FILE.json")
     p.add_argument("--output", metavar="FILE.srt")  # with exactly one --pair: write the result there
     p.add_argument("--progress", action="store_true")  # machine-readable PROGRESS lines on stdout
+    p.add_argument("--sub-lang", choices=["auto", "en", "da"], default="auto")  # 1.5.0: the subtitles' language
+    p.add_argument("--reference", metavar="EN.srt")  # 1.5.0: with one --pair: English subtitle to time a Danish one by
     p.add_argument("-h", "--help", action="store_true")
     return p.parse_args(argv)
 
@@ -78,6 +80,8 @@ def done_fields(data) -> dict:
             "subtitles_after": t.get("subtitles_after"), "joined": t.get("joined", 0),
             "split": t.get("split", 0), "capitals_fixed": t.get("capitals_fixed", 0),
             "kept_visible": t.get("kept_visible", 0),
+            "subtitle_language": data.get("sub_lang", "en"), "timing_from": data.get("timing_from", "audio"),
+            "reference_subtitle": data.get("reference"),
             "timings": timings(data)}
 
 
@@ -111,7 +115,7 @@ def fmt_secs(s):
 
 def main(argv):
     from subsync.media import VIDEO_EXTS
-    from subsync.pairing import expand, pair
+    from subsync.pairing import expand, pair_languages
     from subsync.subtitles import SUB_EXTS
 
     args = parse(argv)
@@ -121,8 +125,22 @@ def main(argv):
     suffix = "." + args.suffix.lstrip(".")
 
     # ---------------------------------------------------------------- pairing
-    rows = []
+    rows = []  # (video, subtitle, language or None, English reference or None)
     used = set()
+    want = None if args.sub_lang == "auto" else args.sub_lang
+    reference = os.path.abspath(args.reference) if args.reference else None
+    if reference:
+        problem = None
+        if len(args.pair) != 1 or args.paths:
+            problem = "--reference needs exactly one --pair and no other files or folders"
+        elif not os.path.isfile(reference):
+            problem = f"--reference not found: {reference}"
+        elif os.path.splitext(reference)[1].lower() not in SUB_EXTS:
+            problem = f"--reference has an unsupported type: {reference}"
+        if problem:
+            print(f"Error: {problem}", file=sys.__stderr__)
+            log(f"usage error: {problem}")
+            return EXIT_USAGE
     for v, s in args.pair:
         v, s = os.path.abspath(v), os.path.abspath(s)
         for f, kind, exts in ((v, "video", VIDEO_EXTS), (s, "subtitle", SUB_EXTS)):
@@ -133,7 +151,7 @@ def main(argv):
             if os.path.splitext(f)[1].lower() not in exts:
                 print(f"Error: --pair {kind} has an unsupported type: {f}", file=sys.__stderr__)
                 return EXIT_USAGE
-        rows.append((v, s))
+        rows.append((v, s, want, reference))
         used.update((v, s))
     output = None
     if args.output:
@@ -175,17 +193,17 @@ def main(argv):
     videos = [v for v in videos if v not in used]
     subs = [s for s in subs if s not in used]
     skipped = []
-    for v, s in pair(videos, subs):
-        if v and s:
-            rows.append((v, s))
-        else:
-            skipped.append({"video": v, "subtitle": s, "status": "skipped",
-                            "reason": "no matching subtitle" if v else "no matching video"})
+    found, unmatched = pair_languages(videos, subs)
+    rows += [(v, s, lang or want, ref) for v, s, lang, ref in found]
+    for v, s in unmatched:
+        skipped.append({"video": v, "subtitle": s, "status": "skipped",
+                        "reason": "no matching subtitle" if v else "no matching video"})
 
     out(f"SubSync {time.strftime('%Y-%m-%d %H:%M')}: {len(rows)} pair(s) to sync"
         + (f", {len(skipped)} file(s) without a partner" if skipped else ""))
-    for n, (v, s) in enumerate(rows, 1):
-        out(f"  {n:>3}. {os.path.basename(v)}  <-  {os.path.basename(s)}")
+    for n, (v, s, lang, ref) in enumerate(rows, 1):
+        out(f"  {n:>3}. {os.path.basename(v)}  <-  {os.path.basename(s)}"
+            + (f"  [{lang}" + (f", timed by {os.path.basename(ref)}" if ref else "") + "]" if lang and lang != "en" else ""))
     for k in skipped:
         out(f"   skip {os.path.basename(k['video'] or k['subtitle'])}  ({k['reason']})")
     if not rows:
@@ -196,11 +214,11 @@ def main(argv):
 
     # ---------------------------------------------------------------- run
     jobs = {}
-    for n, (v, s) in enumerate(rows, 1):
-        jobs[n] = {"video": v, "subtitle": s, "status": "pending", "n": n}
+    for n, (v, s, lang, ref) in enumerate(rows, 1):
+        jobs[n] = {"video": v, "subtitle": s, "status": "pending", "n": n, "sub_lang": lang, "reference": ref}
     speech = {}
     for n, j in jobs.items():
-        engine.submit(n, j["video"], j["subtitle"], output)
+        engine.submit(n, j["video"], j["subtitle"], output, j["sub_lang"], j["reference"])
 
     tty = sys.stdout.isatty() and not args.progress  # no live status line between PROGRESS lines
     total = len(jobs)
@@ -298,7 +316,8 @@ def main(argv):
                         f"shift {lo:+.1f}..{hi:+.1f} s, {len(data['runs'])} section(s), {ends} ending(s) extended"
                         + (f", {recut}" if recut else "") + ")")
                 elif kind == "warning":
-                    j.update(status="no_match", reason=data["text"], audio_language=data.get("lang"))
+                    j.update(status="no_match", reason=data["text"], audio_language=data.get("lang"),
+                             subtitle_language=data.get("sub_lang"))
                     out(f"SKIP {tag} {name}: {data['text']}  (no file written)")
                 else:
                     reason = data["text"] if isinstance(data, dict) else str(data)
@@ -561,6 +580,15 @@ def serve(argv):
                 return f"{kind} not found: {f}"
             if os.path.splitext(f)[1].lower() not in exts:
                 return f"{kind} has an unsupported type: {f}"
+        lang = req.get("subtitle_language", "auto")
+        if lang not in ("auto", "en", "da", None):
+            return "\"subtitle_language\" must be \"auto\", \"en\" or \"da\""
+        ref = req.get("reference")
+        if ref is not None:
+            if not isinstance(ref, str) or not os.path.isfile(ref):
+                return f"reference not found: {ref}"
+            if os.path.splitext(ref)[1].lower() not in SUB_EXTS:
+                return f"reference has an unsupported type: {ref}"
         o = req.get("output")
         if o is not None:
             if not isinstance(o, str) or os.path.splitext(o)[1].lower() != ".srt":
@@ -589,9 +617,18 @@ def serve(argv):
         if req.get("output"):
             return same(req["output"])
         if args.overwrite:  # otherwise a free <stem>.en.#n.srt name is picked when writing
+            from subsync import language
             from subsync.pipeline import output_path
 
-            return same(output_path(req["video"], settings["suffix"], True))
+            if "sub_lang" not in req:  # the result is named after the subtitle's language
+                want = req.get("subtitle_language")
+                try:
+                    from subsync.subtitles import load
+
+                    req["sub_lang"] = language.resolve(req["subtitle"], [] if want in ("en", "da") else load(req["subtitle"]), want)
+                except Exception:
+                    req["sub_lang"] = language.resolve(req["subtitle"], [], want)
+            return same(output_path(req["video"], language.suffix(req["sub_lang"], settings["suffix"]), True))
         return None
 
     while stdin_open or pending:
@@ -615,7 +652,7 @@ def serve(argv):
             next_n += 1
             if req.get("id") is None:
                 req["id"] = f"auto-{next_n}"
-            for key in ("video", "subtitle", "output"):
+            for key in ("video", "subtitle", "output", "reference"):
                 if isinstance(req.get(key), str):
                     req[key] = os.path.abspath(req[key])
             problem = check(req)
@@ -626,7 +663,9 @@ def serve(argv):
             req["t0"] = time.time()
             pending[next_n] = req
             log(f"serve: [#{next_n}] {os.path.basename(req['video'])} <- {os.path.basename(req['subtitle'])}")
-            engine.submit(next_n, req["video"], req["subtitle"], req.get("output"))
+            want = req.get("subtitle_language")
+            engine.submit(next_n, req["video"], req["subtitle"], req.get("output"),
+                          req.get("sub_lang") or (want if want in ("en", "da") else None), req.get("reference"))
             continue
 
         _, jid, kind, data = ev
@@ -676,7 +715,8 @@ def serve(argv):
                 result(req, **f)
             elif kind == "warning":
                 log(f"serve: [#{jid}] {name}: no match: {data['text']}")
-                result(req, status="no_match", reason=data["text"], audio_language=data.get("lang"))
+                result(req, status="no_match", reason=data["text"], audio_language=data.get("lang"),
+                       subtitle_language=data.get("sub_lang"))
             else:
                 reason = data["text"] if isinstance(data, dict) else str(data)
                 log(f"serve: [#{jid}] {name}: {kind}: {reason}")

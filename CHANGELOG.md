@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- **Danish subtitles.** SubSync now also syncs Danish subtitles, typically on English audio. It recognises them by their name (`.da`, `.dan`, `.danish`, `.dansk`) or, cautiously, by their text, and saves the result as `<video>.da.srt` (`.dan.srt` with the three-letter setting). English subtitles are handled exactly as before.
+- **Timed by the English subtitle.** When the same video also has an English subtitle, the English one is synced first and each Danish line takes the timing of the English line(s) that say the same thing. That is more precise than timing it from the audio alone, which is used otherwise (and as a fallback).
+- A video can now have an English and a Danish subtitle in the same run; each is synced and saved separately.
+- Window: a small `EN` / `DA` badge shows each subtitle's language; right-click → *Subtitle language* changes it.
+- Command line: `--sub-lang auto|en|da` and `--reference EN.srt`; `serve` requests take `subtitle_language` and `reference`; the report gets `subtitle_language`, `timing_from` and `reference_subtitle`. Nothing was renamed or removed.
+
 ## 1.4.1
 
 - **No more subtitles that flash by too fast to read.** When a subtitle's timing was moved, the next one could end up starting just after it, and the first one was then cut back to make room, sometimes to a few hundredths of a second. On screen that looked like a missing line. It happened to about 1–3 % of subtitles, most often sound descriptions such as "[door slams]" and short replies. No words were ever removed. Now such a subtitle gets the room before the next one if there is at least 0.5 s, and otherwise stays on screen for 0.7 s together with the next one (players show both; never three at once). With *Tidy up lines* on, a sound description that starts right next to its dialogue becomes one subtitle with it. Starts are not moved for this, so the timing accuracy is unchanged, and with *Tidy up lines* off every original subtitle is still exactly one subtitle in the result. The report counts these as `kept_visible`.

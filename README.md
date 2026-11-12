@@ -42,7 +42,7 @@ You can keep adding files while it is running; they join the queue. **Stop** can
 
 | Setting | What it does |
 |---|---|
-| **Save as `.en.srt` / `.eng.srt`** | The language tag in the file name. |
+| **Save as `.en.srt` / `.eng.srt`** | The language tag in the file name: two or three letters (`.da.srt` / `.dan.srt` for Danish subtitles). |
 | **Overwrite existing** (on) | If a subtitle with that name already exists, it is replaced. If another program (a player, a Jellyfin scan) has it open, SubSync waits until it is released. |
 | **Overwrite existing** (off) | The existing file is kept and the new one is saved as `name.en.#1.srt` (then `#2`, …). |
 | **Tidy up lines** (on, the default) | The subtitle is re-cut so each subtitle holds one sentence (or a natural part of a long one), with at most 2 lines of 42 characters. Different speakers get their own subtitle; very short replies are paired with dashes (`- Thanks.` / `- You're welcome.`). Capital letters are repaired (`i` → `I`, names as they were spoken). The words themselves are never changed. |
@@ -59,6 +59,8 @@ You can keep adding files while it is running; they join the queue. **Stop** can
 - **Messy TV captions** (with *Tidy up lines*): sentences chopped across subtitles, two speakers squeezed into one subtitle, 3–4 line subtitles and missing capitals.
 
 The audio may be in any language. The subtitle must be **English**. When a video has several audio tracks, SubSync prefers the English one, because matching is most precise when audio and subtitle share a language.
+
+**Danish subtitles** (since 1.5.0) work too, typically on English audio. SubSync recognises them by their name (`.da.srt`, `.dan.srt`, `.danish`, `.dansk`) or their text, shows `DA` next to them in the table (right-click to change the language), and saves the result as `<video>.da.srt` (`.dan.srt` with the three-letter setting). When the same video also has an English subtitle, drop both: the English one is synced first and the Danish one takes its timing from it, which is more precise than timing it from the audio alone.
 
 ## Reading the result
 

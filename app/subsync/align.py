@@ -204,8 +204,11 @@ def _smooth(vals: list[float], k=2) -> list[float]:
 
 # --------------------------------------------------------------- main entry
 def align(lines: list[Line], words, lang: str, embed, sub_lang: str = "en",
-          progress=lambda f: None) -> Result:
-    phrases = build_phrases(words, lang)
+          progress=lambda f: None, phrases: list[Phrase] | None = None) -> Result:
+    """phrases: what to match the lines to, instead of the phrases heard in words (1.5.0: the
+    lines of a synced English subtitle, to time a Danish one by)."""
+    if phrases is None:
+        phrases = build_phrases(words, lang)
     speech_idx = [i for i, l in enumerate(lines) if speech_text(l.text)]
     texts = [speech_text(lines[i].text) for i in speech_idx]
     n_speech = len(texts)

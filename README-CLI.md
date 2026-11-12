@@ -42,15 +42,26 @@ D:\Tools\SubSync\subsync-cli.exe .
 |---|---|
 | `<files or folders…>` | Any mix of videos, subtitles and folders (searched recursively). Pairing works like the window: same name (`Movie.mkv` ↔ `Movie.en.srt`), then same episode code (`S01E04` / `1x04`), then closest name. |
 | `--pair VIDEO SUBTITLE` | Sync this exact pair. Repeatable. Files given here are left out of automatic pairing. |
-| `--suffix en` / `--suffix eng` | Result name `<video>.en.srt` (default) or `<video>.eng.srt`. |
+| `--suffix en` / `--suffix eng` | Result name `<video>.en.srt` (default) or `<video>.eng.srt`; for Danish subtitles `<video>.da.srt` or `<video>.dan.srt`. |
 | `--overwrite` | Replace an existing result. Without it the existing file is kept and the result is `<video>.en.#1.srt` (`#2`, …). If the existing file is open in another program, SubSync waits up to 5 minutes for it to be released. |
 | `--keep-layout` | Turn *Tidy up lines* off: keep the original line layout and capitals. The timing is still fixed line by line. (The window's setting does not affect the command line; tidying is on unless this option is given.) |
 | `--cpu` | Don't use the NVIDIA GPU (slower; for testing, or if the GPU is busy). |
 | `--report FILE.json` | Write a machine-readable report (format below). |
 | `--output FILE.srt` | (Since 1.3.0.) Write the result to exactly this file instead of `<video>.en.srt`. Only with exactly one `--pair` and no other files or folders; `--suffix` is then not used. If the file exists, `--overwrite` is required (otherwise exit code 6, before any work). It may be the input subtitle itself, which is then replaced in place. |
+| `--sub-lang auto\|en\|da` | (Since 1.5.0.) The subtitles' language. `auto` (default): from the file name (`.da`, `.dan`, `.danish`, `.dansk` / `.en`, `.eng`, `.english`), otherwise from the text, and English when unsure. |
+| `--reference EN.srt` | (Since 1.5.0.) With exactly one `--pair` of a Danish subtitle: an English subtitle of the same video to take the timing from (see [Danish subtitles](#danish-subtitles)). With folders, the English subtitle paired with the same video is used by itself. |
 | `--progress` | (Since 1.3.0.) Print machine-readable progress lines on stdout, for programs that run SubSync (see [Progress lines](#progress-lines---progress)). The live status line is not shown. |
 
-Supported inputs: videos `.mkv .mp4 .m4v .avi .mov .wmv .ts .m2ts .mts .webm .flv .mpg .mpeg .vob .ogm`; subtitles `.srt .ass .ssa .vtt` (English). Results are always `.srt` (UTF-8), written **next to the video**.
+Supported inputs: videos `.mkv .mp4 .m4v .avi .mov .wmv .ts .m2ts .mts .webm .flv .mpg .mpeg .vob .ogm`; subtitles `.srt .ass .ssa .vtt` (English, or since 1.5.0 Danish). Results are always `.srt` (UTF-8), written **next to the video**.
+
+### Danish subtitles
+
+(Since 1.5.0.) A Danish subtitle is synced in one of two ways; the report's `timing_from` says which:
+
+- **`reference`**: the video also has an English subtitle (paired with it in the same run, or given with `--reference`). The English one is synced first (word-accurate on English audio), then each Danish line is matched to the English line or lines that say the same thing and takes their timing. This is the more precise way. If the English subtitle can't be synced or doesn't match, SubSync falls back to the audio.
+- **`audio`**: the Danish lines are matched to the spoken phrases by meaning, as for English subtitles on audio in another language.
+
+With folders, a video can have both an English and a Danish subtitle; each is synced and written separately (`.en.srt` and `.da.srt`). *Tidy up lines* only splits Danish subtitles taller than two rows (re-cutting into sentences needs words in the subtitle's own language).
 
 ## Output
 
@@ -123,6 +134,9 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
       "split": 107,
       "capitals_fixed": 85,
       "kept_visible": 6,
+      "subtitle_language": "en",
+      "timing_from": "audio",
+      "reference_subtitle": null,
       "timings": { "from_cache": false, "read_audio": 9.8, "listen": 58.1, "match": 4.2 }
     },
     { "video": "…S01E02…", "subtitle": "…", "status": "no_match",
@@ -133,7 +147,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 }
 ```
 
-`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones. `kept_visible` (since 1.4.1) counts subtitles that would otherwise have flashed by too fast to see. Such a line now gets the room before the next one (at least 0.5 s), or stays up for 0.7 s together with the next one (never three at once). With *Tidy up lines* on, a sound description that starts right next to a neighbour becomes one subtitle with it. Starts are never moved for this.
+`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones. `kept_visible` (since 1.4.1) counts subtitles that would otherwise have flashed by too fast to see. Such a line now gets the room before the next one (at least 0.5 s), or stays up for 0.7 s together with the next one (never three at once). With *Tidy up lines* on, a sound description that starts right next to a neighbour becomes one subtitle with it. Starts are never moved for this. `subtitle_language` (since 1.5.0) is `en` or `da`; `timing_from` is `audio` or `reference` (a Danish subtitle timed by an English one, which is then named in `reference_subtitle`, otherwise `null`). A `no_match` item also has `subtitle_language`.
 
 `speech_recognition` (since 1.3.0) says what listened: `device` is `gpu` or `cpu` (a GPU problem during the run switches to `cpu`, and the report says so), `name` is the graphics card, `model_load_seconds` how long the speech model took to load. It is `null` when nothing had to be listened to, for example when every transcript came from the cache. `timings` (since 1.3.0, synced items) gives the seconds spent reading the audio, listening and matching; `from_cache: true` means the transcript was remembered from an earlier run, so `read_audio` and `listen` are `null`.
 
@@ -180,7 +194,7 @@ subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90]
 **Output (stdout):** exactly one JSON object on one line (after the `PROGRESS` lines with `--progress`). Setup or repair messages go to stderr.
 
 ```json
-{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.4.1"}
+{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.5.0"}
 ```
 
 | Field | Meaning |
@@ -219,7 +233,8 @@ The options apply to every item and work as in `sync`. `--overwrite` is needed t
 ```
 
 - `id` is any string or number, and is echoed in every event about the item. Without one, SubSync uses `"auto-N"` (N = the request's line number).
-- `video` and `subtitle` are required. `output` is optional: the exact file to write (as with `--output`), otherwise `<video>.en.srt` with the usual naming rules.
+- `video` and `subtitle` are required. `output` is optional: the exact file to write (as with `--output`), otherwise `<video>.en.srt` with the usual naming rules (`<video>.da.srt` for a Danish subtitle).
+- (Since 1.5.0.) `subtitle_language` is optional: `"auto"` (default, as `--sub-lang auto`), `"en"` or `"da"`. `reference` is optional: an English subtitle of the same video to time a Danish one by (as `--reference`).
 - SubSync may start on an item as soon as it is received, and writes its result when that item is finished. A program that keeps a backup of the subtitle should make it before sending the request.
 - Sending one item ahead of the one being worked on is enough for the overlap.
 - stdin may stay open between items: each `result` comes as soon as its item is finished. (On Windows, 1.3.0 only started working once stdin was closed; fixed in 1.3.1.)
@@ -382,6 +397,8 @@ python serve_e2e.py                            # `serve` end-to-end; exits non-z
 python serve_pipe_e2e.py                       # `serve` as a separate process with piped, open stdin (also on Windows)
 python detect_e2e.py && python test_detect.py  # `detect` end-to-end (stand-in for Whisper) and its unit tests
 python test_visible.py                         # no subtitle too short to be seen; every word kept
+python test_danish.py && python danish_e2e.py  # Danish subtitles: language, names, pairing, timing; command line and serve
+python gui_danish_e2e.py                       # Danish subtitles in the window (QT_QPA_PLATFORM=offscreen)
 python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
 

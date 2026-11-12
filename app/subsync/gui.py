@@ -7,7 +7,7 @@ import time
 
 from PySide6.QtCore import (Property, QEasingCurve, QObject, QPropertyAnimation, QRectF, QSize, Qt,
                             QTimer, Signal)
-from PySide6.QtGui import (QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter,
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter,
                            QPainterPath, QPen, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication, QButtonGroup,
                                QFrame, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMenu,
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import paths, theme
-from .pairing import expand, pair
+from .pairing import expand, pair_languages
 from .theme import C
 
 APP_NAME = "SubSync"
@@ -68,13 +68,24 @@ class Bridge(QObject):
     event = Signal(object, str, object)
 
 
+def sub_language(path, wanted=None) -> str:
+    """'en' or 'da' for a subtitle file (its name, else its text; English when unsure)."""
+    from . import language, subtitles
+
+    try:
+        return language.resolve(path, subtitles.load(path), wanted)
+    except Exception:
+        return language.resolve(path, [], wanted)
+
+
 class Job:
     _next = 1
 
-    def __init__(self, video, sub):
+    def __init__(self, video, sub, lang=None):
         self.id = Job._next
         Job._next += 1
         self.video, self.sub = video, sub
+        self.lang = sub_language(sub, lang) if sub else None  # the subtitle's language (1.5.0)
         self.state = WAITING if (video and sub) else INCOMPLETE
         self.text = ""
         self.detail = ""
@@ -193,11 +204,27 @@ class FileDelegate(QStyledItemDelegate):
         folder = os.path.dirname(path)
         fm = p.fontMetrics()
         top = r.top() + (r.height() - 2 * fm.height() - 2) / 2
+        name_w = r.width()
+        if self.col == 1 and job.lang:  # the subtitle's language as a small badge (1.5.0)
+            bf = QFont(option.font)
+            bf.setPointSizeF(bf.pointSizeF() * 0.75)
+            bf.setWeight(QFont.DemiBold)
+            bm = QFontMetrics(bf)
+            bw, bh = bm.horizontalAdvance(job.lang.upper()) + 10, bm.height() + 2
+            badge = QRectF(r.right() - bw, top + (fm.height() - bh) / 2, bw, bh)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(qc("faint"), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(badge.adjusted(0.5, 0.5, -0.5, -0.5), bh / 2, bh / 2)
+            p.setPen(qc("sub"))
+            p.setFont(bf)
+            p.drawText(badge, Qt.AlignCenter, job.lang.upper())
+            name_w -= bw + 8
         p.setPen(qc("text"))
         f.setWeight(QFont.Medium)
         p.setFont(f)
-        p.drawText(QRectF(r.left(), top, r.width(), fm.height()), Qt.AlignLeft | Qt.AlignVCenter,
-                   p.fontMetrics().elidedText(name, Qt.ElideMiddle, r.width()))
+        p.drawText(QRectF(r.left(), top, name_w, fm.height()), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(name, Qt.ElideMiddle, name_w))
         f.setWeight(QFont.Normal)
         f.setPointSizeF(f.pointSizeF() * 0.88)
         p.setFont(f)
@@ -468,6 +495,7 @@ class MainWindow(QMainWindow):
             b.setObjectName("seg")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(("Two-letter names: .en.srt, and .da.srt for Danish subtitles", "Three-letter names: .eng.srt, and .dan.srt for Danish subtitles")[i])
             self.seg_group.addButton(b, i)
             sl.addWidget(b)
         self.seg_group.button(1 if self.settings.get("suffix") == ".eng" else 0).setChecked(True)
@@ -567,6 +595,7 @@ class MainWindow(QMainWindow):
                     j.video = videos[0]
                 else:
                     j.sub = subs[0]
+                    j.lang = sub_language(j.sub)
                 self._reset(j)
                 self.rebuild()
                 self.after_change()
@@ -578,7 +607,10 @@ class MainWindow(QMainWindow):
         pool_s = [j.sub for j in half if j.sub] + [s for s in subs if s not in have_s]
         for j in half:
             self.jobs.remove(j)
-        for v, s in pair(pool_v, pool_s):
+        rows, unmatched = pair_languages(pool_v, pool_s)
+        for v, s, lang, _ in rows:  # one row per subtitle; a video may have an English and a Danish one
+            self.jobs.append(Job(v, s, lang))
+        for v, s in unmatched:
             self.jobs.append(Job(v, s))
         self.rebuild()
         self.after_change()
@@ -635,7 +667,10 @@ class MainWindow(QMainWindow):
     def submit(self, j: Job):
         j.state, j.text, j.progress = QUEUED, "Queued", 0.0
         self.run_total += 1
-        self.engine.submit(j.id, j.video, j.sub)
+        ref = None
+        if j.lang != "en":  # time it by the English subtitle of the same video, if there is one
+            ref = next((x.sub for x in self.jobs if x is not j and x.video == j.video and x.sub and x.lang == "en"), None)
+        self.engine.submit(j.id, j.video, j.sub, None, j.lang, ref)
 
     def _begin_run(self):
         if not self.running:
@@ -695,10 +730,23 @@ class MainWindow(QMainWindow):
         m.addAction("Open folder", lambda: self.reveal(folder, folder=True))
         if j.state in (ERROR, WARNING, CANCELLED, DONE) and j.video and j.sub:
             m.addAction("Run again", lambda: self.retry(j))
+        if j.sub and j.state not in ACTIVE:
+            lm = m.addMenu("Subtitle language")
+            for code, name in (("en", "English"), ("da", "Danish")):
+                a = lm.addAction(name, lambda c=code: self.set_language(j, c))
+                a.setCheckable(True)
+                a.setChecked(j.lang == code)
         if j.state not in ACTIVE:
             m.addSeparator()
             m.addAction("Remove", self.remove_selected)
         m.exec(self.table.viewport().mapToGlobal(pos))
+
+    def set_language(self, j, code):
+        if j.lang != code:
+            j.lang = code
+            self._reset(j)
+            self.rebuild()
+            self.after_change()
 
     def retry(self, j):
         self._reset(j)
@@ -751,6 +799,7 @@ class MainWindow(QMainWindow):
                         + (f" · {n_runs} timing sections" if n_runs > 1 else "")
                         + (f" · {sum(data['ends'][:2])} endings extended" if sum(data['ends'][:2]) else "")
                         + (f" · {recut}" if recut else "")
+                        + (" · timed by the English subtitle" if data.get("timing_from") == "reference" else "")
                         + f" · audio: {data['lang']}")
             st = data.get("stats", {})
             runs = "\n".join(f"   {self._ts(a)}–{self._ts(b)}:  {o:+.2f} s" for a, b, o in data["runs"])
