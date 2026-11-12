@@ -26,6 +26,9 @@ if __name__ == "__main__":
         {"id": "e1", "video": W + "/Show.S01E01.1080p.mkv", "subtitle": W + "/Show.S01E01.en.hi.srt",
          "output": W + "/Show.S01E01.en.hi.srt"},                      # in place (needs --overwrite)
         {"id": "e2", "video": W + "/Show.S01E02.1080p.mp4", "subtitle": W + "/Show S01E02 WEB-DL.srt"},
+        {"id": "clash", "video": W + "/Show.S01E02.1080p.mp4", "subtitle": W + "/Show S01E02 WEB-DL.srt",
+         "output": W + "/Show.S01E01.en.hi.srt"},                      # e1 is still writing that file
+        {"video": W + "/nope2.mkv", "subtitle": W + "/x.srt"},          # no id: gets auto-N
         "not json",
         {"id": "bad", "video": W + "/nope.mkv", "subtitle": W + "/Show.S01E01.en.srt"},
         {"id": "e1-again", "video": W + "/Show.S01E01.1080p.mkv", "subtitle": W + "/Show.S01E01.en.srt",
@@ -38,7 +41,7 @@ if __name__ == "__main__":
     def feed():
         with os.fdopen(w, "w", encoding="utf-8") as f:
             for k, q in enumerate(reqs):
-                if isinstance(q, dict) and q["id"] == "e1-again":  # once e1's transcript is cached
+                if isinstance(q, dict) and q.get("id") == "e1-again":  # once e1's transcript is cached
                     while '"id":"e1","video"' not in out.getvalue():
                         time.sleep(0.1)
                 f.write((q if isinstance(q, str) else json.dumps(q)) + "\n"); f.flush()
@@ -51,7 +54,12 @@ if __name__ == "__main__":
     ev = [json.loads(l) for l in lines]
     print("\n".join(lines[:60]))
     res = {e["id"]: e for e in ev if e["event"] == "result"}
-    ok = lambda c, m: print(("PASS " if c else "FAIL ") + m)
+    fails = []
+
+    def ok(c, m):
+        print(("PASS " if c else "FAIL ") + m)
+        if not c:
+            fails.append(m)
     ok(code == 0, f"exit code 0 (got {code})")
     ok(all(l.startswith("{") for l in lines), "every stdout line is JSON")
     ok(ev[0]["event"] == "ready" and ev[0]["subsync_version"] == cli.VERSION, "first event is ready")
@@ -68,4 +76,8 @@ if __name__ == "__main__":
     i1 = next(i for i, e in enumerate(ev) if e["event"] == "result" and e["id"] == "e1")
     i2 = next(i for i, e in enumerate(ev) if e["event"] == "stage" and e["id"] == "e2" and e["stage"] == "reading_audio")
     ok(i2 < i1, "e2's audio is read before e1 is finished (overlap)")
-    os._exit(0)
+    ok(res.get("clash", {}).get("status") == "failed" and "in progress" in res["clash"]["reason"],
+       "a second item writing e1's file is refused")
+    ok(any(str(k).startswith("auto-") for k in res), "request without id gets an auto-N id")
+    print(f"{len(fails)} failed")
+    os._exit(1 if fails else 0)

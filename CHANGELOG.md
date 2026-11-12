@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 (not released yet)
+## 1.3.0
 
 Faster starts; the results and the matching are unchanged.
 

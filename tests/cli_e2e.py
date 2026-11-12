@@ -39,11 +39,25 @@ if __name__ == "__main__":
                                     W + "/Show.S01E01.en.srt"],
         "output with folder":      [W, "--output", W + "/x.srt"],
         "output not srt":          ["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.en.srt", "--output", W + "/x.txt"],
+        "gpu fails at start":      [W, "--report", W + "/r6.json"],
     }
     which = sys.argv[1]
+    expected = {"wrong subtitle (no match)": 4, "nothing to pair": 5, "missing path": 6, "bad option": 6,
+                "output exists": 6, "output with folder": 6, "output not srt": 6}.get(which, 0)
+    if which == "gpu fails at start":
+        os.environ["SUBSYNC_FAKE_GPU_FATAL"] = "1"
+        shutil.rmtree("/tmp/ssroot_cli/cache", ignore_errors=True)  # make it listen, not use the cache
     os.makedirs(W + "/out", exist_ok=True)
-    code = cli.main(cases[which])
+    try:
+        code = cli.main(cases[which])
+    except SystemExit as e:  # argparse errors ("bad option")
+        code = e.code
     print(f"EXIT {code}")
-    for r in ("r1", "r3", "r4", "r5"):
+    if which == "gpu fails at start":
+        rep = json.load(open(W + "/r6.json"))
+        if rep["speech_recognition"]["device"] != "cpu" or rep["summary"]["synced"] != 2:
+            print("FAIL: expected both items synced on the CPU after the GPU failed"); code = -1
+    for r in ("r1", "r3", "r4", "r5", "r6"):
         if os.path.exists(f"{W}/{r}.json"): print(open(f"{W}/{r}.json").read()[:900])
-    os._exit(code)
+    print("PASS" if code == expected else f"FAIL: expected exit code {expected}, got {code}")
+    os._exit(0 if code == expected else 1)  # this script's exit code: 0 = the case behaved as expected

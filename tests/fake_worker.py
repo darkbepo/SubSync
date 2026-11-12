@@ -2,14 +2,20 @@
 transcript comes from the fixture's sidecar file instead of Whisper."""
 import os as _os, sys as _sys
 _REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-import json, time
+import json, os, time
 def worker_main(req_q, res_q, cancel_ev, force_cpu, batch_hint):
     import sys; sys.path.insert(0, _os.path.join(_REPO, "app"))
     from subsync import paths; paths.setup_environment()
     from subsync.media import decode
     from subsync.asr_worker import _clips
     from faster_whisper.vad import VadOptions, get_speech_timestamps
-    res_q.put(("device", "cuda", "FAKE GPU", 8, [], 0.5))
+    if os.environ.get("SUBSYNC_FAKE_GPU_FATAL") and not force_cpu:
+        # like the real worker when the GPU model fails to load: its audio reader has already
+        # taken the first job; the engine must resend that job to a CPU worker
+        req_q.get()
+        res_q.put(("fatal", "fake: GPU model could not be loaded"))
+        return
+    res_q.put(("device", "cpu" if force_cpu else "cuda", "" if force_cpu else "FAKE GPU", 8, [], 0.5))
     while True:
         job = req_q.get()
         if job is None: return

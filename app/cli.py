@@ -422,6 +422,27 @@ def serve(argv):
                 return f"output exists: {o} (start serve with --overwrite to replace files)"
         if any(r["id"] == req["id"] for r in pending.values()):
             return f"id {req['id']!r} is already in progress"
+        # no two items in progress may write the same file, or write another one's subtitle
+        mine = target(req)
+        for r in pending.values():
+            theirs = target(r)
+            if mine and mine in (theirs, same(r["subtitle"])):
+                return f"another item in progress ({r['id']!r}) uses {mine}"
+            if theirs and theirs == same(req["subtitle"]):
+                return f"another item in progress ({r['id']!r}) writes this subtitle"
+        return None
+
+    def same(path):
+        return os.path.normcase(os.path.abspath(path))
+
+    def target(req):
+        """The file this request will write, when it is known in advance."""
+        if req.get("output"):
+            return same(req["output"])
+        if args.overwrite:  # otherwise a free <stem>.en.#n.srt name is picked when writing
+            from subsync.pipeline import output_path
+
+            return same(output_path(req["video"], settings["suffix"], True))
         return None
 
     while stdin_open or pending:
@@ -443,7 +464,8 @@ def serve(argv):
                 emit({"event": "result", "id": None, "status": "failed", "reason": f"not a valid request: {e}"})
                 continue
             next_n += 1
-            req.setdefault("id", next_n)
+            if req.get("id") is None:
+                req["id"] = f"auto-{next_n}"
             for key in ("video", "subtitle", "output"):
                 if isinstance(req.get(key), str):
                     req[key] = os.path.abspath(req[key])

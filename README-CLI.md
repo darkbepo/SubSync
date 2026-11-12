@@ -172,7 +172,7 @@ The options apply to every item and work as in `sync`. `--overwrite` is needed t
 {"id": "ep-4711", "video": "D:\\Shows\\Show.S01E01.mkv", "subtitle": "D:\\Shows\\Show.S01E01.en.hi.srt", "output": "D:\\Shows\\Show.S01E01.en.hi.srt"}
 ```
 
-- `id` is any string or number, and is echoed in every event about the item. Without one, the request's line number is used.
+- `id` is any string or number, and is echoed in every event about the item. Without one, SubSync uses `"auto-N"` (N = the request's line number).
 - `video` and `subtitle` are required. `output` is optional: the exact file to write (as with `--output`), otherwise `<video>.en.srt` with the usual naming rules.
 - SubSync may start on an item as soon as it is received, and writes its result when that item is finished. A program that keeps a backup of the subtitle should make it before sending the request.
 - Sending one item ahead of the one being worked on is enough for the overlap.
@@ -196,7 +196,7 @@ The options apply to every item and work as in `sync`. `--overwrite` is needed t
 | `device` | Speech recognition is ready, as in `--progress`, plus `model_load_seconds`. Comes again if a GPU problem switches to the CPU. |
 | `warning` | `text`: a problem that doesn't stop the work, for example the GPU fallback. |
 | `stage` | As in `--progress`, with `id` instead of `item`. |
-| `result` | The item is finished. `status` and the other fields are those of a report item (`synced`, `no_match`, `failed`). A request that can't run (bad JSON, missing file, `output` exists without `--overwrite`, an `id` already in progress) gets a `result` with `status` `failed` and a `reason` straight away; its `id` is `null` if the line couldn't be read. |
+| `result` | The item is finished. `status` and the other fields are those of a report item (`synced`, `no_match`, `failed`). A request that can't run (bad JSON, missing file, `output` exists without `--overwrite`, an `id` already in progress, or a file that an item still in progress writes or reads) gets a `result` with `status` `failed` and a `reason` straight away; its `id` is `null` if the line couldn't be read. |
 
 Lines before `ready` can be setup or repair messages from the self-check (plain text). Ignore any line that doesn't start with `{`. New events and fields may be added later; ignore what you don't know. Exit codes: `0` (stdin closed, all done), `6` (bad option), `7` (setup/repair not possible), `9` (Ctrl+C), `10` (unexpected error). Details go to `logs\cli.log` as `serve:` lines.
 
@@ -328,8 +328,10 @@ cd tests
 python sim.py                                  # alignment accuracy: 45-min episodes, splits, drift, bad lines,
                                                # early endings, English and other-language audio
 python make_fixtures.py && python gui_e2e.py   # window end-to-end (videos with synthesized speech)
-python cli_e2e.py "whole folder"               # command line end-to-end (also: "explicit pair + eng",
-                                               # "wrong subtitle (no match)", "nothing to pair", "keep layout", ...)
+python cli_e2e.py "whole folder"               # command line end-to-end, one case per run (also: "explicit pair + eng",
+                                               # "wrong subtitle (no match)", "progress + output", "gpu fails at start", ...);
+                                               # prints PASS and exits 0 when the case ends with its expected exit code
+python serve_e2e.py                            # `serve` end-to-end; exits non-zero if any check fails
 python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
 

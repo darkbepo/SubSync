@@ -223,16 +223,21 @@ class Engine:
             self.force_cpu = True
             self.emit(None, "device", {"state": "error",
                                        "text": f"GPU worker stopped (code {code}) – switched to CPU (slower)"})
-            jobs = list(self.inflight.values())
-            self.inflight.clear()
-            with self._lock:
-                self._spawn()
-            for j in jobs:
-                self._send(j)
+            self._respawn_and_resend()
         else:
             for jid in list(self.inflight):
                 self.emit(jid, "error", "Speech recognition stopped unexpectedly")
             self.inflight.clear()
+
+    def _respawn_and_resend(self):
+        """Start a fresh (CPU) worker and hand it every job the old one had. One locked step, so a
+        job submitted meanwhile can't go to a worker that is about to be replaced and be lost."""
+        with self._lock:
+            jobs = list(self.inflight.values())
+            self.inflight.clear()
+            self._spawn()
+            for j in jobs:
+                self._send(j)
 
     def _handle(self, msg):
         kind = msg[0]
@@ -246,12 +251,7 @@ class Engine:
                 self.force_cpu = True
                 self.emit(None, "device", {"state": "error", "text": "GPU could not start – using CPU (slower)",
                                            "detail": msg[1]})
-                jobs = list(self.inflight.values())
-                self.inflight.clear()
-                with self._lock:
-                    self._spawn()
-                for j in jobs:
-                    self._send(j)
+                self._respawn_and_resend()
             else:
                 self.emit(None, "device", {"state": "error", "text": "Speech recognition could not start",
                                            "detail": msg[1]})
