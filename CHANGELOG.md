@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+- **No more subtitles that flash by too fast to read.** When a subtitle's timing was moved, the next one could end up starting just after it, and the first one was then cut back to make room, sometimes to a few hundredths of a second. On screen that looked like a missing line. It happened to about 1–3 % of subtitles, most often sound descriptions such as "[door slams]" and short replies. No words were ever removed. Now every subtitle stays on screen for at least 0.7 s: a sound description that starts right next to its dialogue becomes one subtitle with it, and any other such line stays up together with the next one (players show both). Starts are not moved for this, so the timing accuracy is unchanged. The report counts these as `kept_visible`.
+- A subtitle row that is only a number (for example "1985") is no longer mistaken for the next subtitle's number in files without numbering.
+- New `tools/check_srt.py` lists subtitles in a result that are hard to see, and with the original also checks that every word is still there.
+
 ## 1.4.0
 
 - **New: `subsync-cli detect <video>`** finds out which language is spoken, from a short sample, for files whose audio is tagged "und" or not tagged at all. It reads 30-second pieces spread over the video, keeps only the parts with voice (up to 90 s of speech), and runs Whisper's language detection on them, without transcribing anything. One JSON object on stdout (`language`, `probability`, which track was checked and its tag, …). It is read-only (nothing is written next to the video or into the cache), checks the same audio track `sync` would use unless `--track` says otherwise, and can run while `serve` is running; if the GPU is full it switches to the CPU. For the Jellyfin plugin's Check button.

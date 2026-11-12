@@ -122,6 +122,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
       "joined": 120,
       "split": 107,
       "capitals_fixed": 85,
+      "kept_visible": 6,
       "timings": { "from_cache": false, "read_audio": 9.8, "listen": 58.1, "match": 4.2 }
     },
     { "video": "…S01E02…", "subtitle": "…", "status": "no_match",
@@ -132,7 +133,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 }
 ```
 
-`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones.
+`status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones. `kept_visible` (since 1.4.1) counts subtitles that would otherwise have been on screen for less than 0.7 s: a sound description that starts right next to its dialogue became one subtitle with it, any other such line now stays up for 0.7 s, shown together with the next one.
 
 `speech_recognition` (since 1.3.0) says what listened: `device` is `gpu` or `cpu` (a GPU problem during the run switches to `cpu`, and the report says so), `name` is the graphics card, `model_load_seconds` how long the speech model took to load. It is `null` when nothing had to be listened to, for example when every transcript came from the cache. `timings` (since 1.3.0, synced items) gives the seconds spent reading the audio, listening and matching; `from_cache: true` means the transcript was remembered from an earlier run, so `read_audio` and `listen` are `null`.
 
@@ -179,7 +180,7 @@ subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90]
 **Output (stdout):** exactly one JSON object on one line (after the `PROGRESS` lines with `--progress`). Setup or repair messages go to stderr.
 
 ```json
-{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.4.0"}
+{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.4.1"}
 ```
 
 | Field | Meaning |
@@ -380,8 +381,11 @@ python cli_e2e.py "whole folder"               # command line end-to-end, one ca
 python serve_e2e.py                            # `serve` end-to-end; exits non-zero if any check fails
 python serve_pipe_e2e.py                       # `serve` as a separate process with piped, open stdin (also on Windows)
 python detect_e2e.py && python test_detect.py  # `detect` end-to-end (stand-in for Whisper) and its unit tests
+python test_visible.py                         # no subtitle too short to be seen; every word kept
 python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
+
+**Checking a result for lines that are hard to see:** `python tools/check_srt.py RESULT.srt [ORIGINAL.srt]` (or a folder) lists subtitles shown for less than 0.7 s, ones out of order, and, with the original, whether every word is still there. It needs only Python, for example an installed SubSync's `runtime\python\python.exe`.
 
 **Trying a change on a real episode** without rebuilding the exe or re-running speech recognition (the episode must have been synced once, so its transcript is cached):
 

@@ -50,7 +50,7 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> P
     for other audio, (tidy) only cues taller than two rows are split."""
     from . import reshape as R
     from . import words as W
-    from .align import align
+    from .align import align, keep_visible
 
     res = align(lines, words, lang, embed, "en", progress=progress)
     stats = {"tidy": bool(tidy), "word_timed": 0, "subtitles_before": len(lines), "subtitles_after": len(lines),
@@ -82,6 +82,11 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> P
         out, sources = res.lines, [[k] for k in range(len(lines))]
     if english and tidy:
         stats["word_timed"] = len(timed)
+    # nothing may end up too short to be seen (it would look like a dropped line)
+    out, groups, vis = keep_visible(out)
+    sources = [[c for g in grp for c in sources[g]] for grp in groups]
+    timed = {n for n, grp in enumerate(groups) if any(g in timed for g in grp)}
+    stats["kept_visible"] = sum(vis.values())
     stats["subtitles_after"] = len(out)
     used: dict = {}
     for src in sources:

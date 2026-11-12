@@ -393,3 +393,67 @@ def fix_endings(new: list[Line], orig: list[Line], speech_end: dict) -> tuple[in
         if target > limit + 0.01:
             n_limited += 1
     return n_speech, n_read, n_limited
+
+
+MIN_SHOW = 0.7     # no subtitle is shown for less than this (shorter looks like a missing line)
+JOIN_WITHIN = 0.3  # a sound description this close to its neighbour's start becomes one subtitle with it
+
+
+def keep_visible(lines: list[Line]) -> tuple[list[Line], list[list[int]], dict]:
+    """Last pass before writing: make sure every subtitle stays on screen long enough to be
+    seen. Moving starts can leave a subtitle only a few hundredths of a second before the next
+    one, which on screen looks as if the line was dropped. Nothing is ever removed or shortened.
+    A subtitle that is too short:
+      1. becomes one subtitle with its neighbour, if one of the two is a sound description,
+         they start within JOIN_WITHIN of each other and fit in two rows; it starts with the
+         dialogue (no dashes are invented: speaker changes can't be told);
+      2. otherwise stays on screen for MIN_SHOW together with the next one (players show both,
+         stacked), so both keep their exact starts.
+    Returns the lines, which input lines each one came from, and counts."""
+    out = [Line(l.start, l.end, l.text) for l in lines]
+    groups = [[k] for k in range(len(out))]
+    stats = {"joined_sound": 0, "overlap": 0}
+
+    def rows(t):
+        return len(t.split("\n"))
+
+    def sound(t):
+        return speech_text(t) is None
+
+    k = 0
+    while k < len(out):
+        a = out[k]
+        if a.end - a.start >= MIN_SHOW - 1e-6:
+            k += 1
+            continue
+        nxt = out[k + 1] if k + 1 < len(out) else None
+        need = a.start + MIN_SHOW
+        if nxt is None or need <= nxt.start - GAP:  # room after it
+            a.end = max(a.end, need)
+            k += 1
+            continue
+        # 1. a sound description joins its neighbour, at the dialogue's own start
+        joined = False
+        for j in (k + 1, k - 1):
+            if not 0 <= j < len(out):
+                continue
+            b = out[j]
+            if (sound(a.text) or sound(b.text)) and rows(a.text) + rows(b.text) <= 2 and abs(b.start - a.start) <= JOIN_WITHIN:
+                first, second = (a, b) if j > k else (b, a)
+                talk = [x for x in (a, b) if not sound(x.text)]
+                start = talk[0].start if talk else min(a.start, b.start)
+                m = Line(start, max(a.end, b.end, start + MIN_SHOW), first.text + "\n" + second.text)
+                lo = min(j, k)
+                out[lo:lo + 2] = [m]
+                groups[lo:lo + 2] = [groups[lo] + groups[lo + 1]]
+                stats["joined_sound"] += 1
+                k = max(0, lo - 1)  # look again at the one before (it may now be too short itself)
+                joined = True
+                break
+        if joined:
+            continue
+        # 2. shown together with the next one
+        a.end = max(a.end, need)
+        stats["overlap"] += 1
+        k += 1
+    return out, groups, stats

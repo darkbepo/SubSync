@@ -18,7 +18,7 @@ import time
 import traceback
 
 T_PROCESS = time.time()  # detect's "seconds" counts from here
-VERSION = "1.4.0"  # also in launcher/cli.go
+VERSION = "1.4.1"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video
@@ -77,6 +77,7 @@ def done_fields(data) -> dict:
             "tidy": bool(t.get("tidy", False)), "subtitles_before": t.get("subtitles_before"),
             "subtitles_after": t.get("subtitles_after"), "joined": t.get("joined", 0),
             "split": t.get("split", 0), "capitals_fixed": t.get("capitals_fixed", 0),
+            "kept_visible": t.get("kept_visible", 0),
             "timings": timings(data)}
 
 

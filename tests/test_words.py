@@ -218,11 +218,16 @@ class ProcessTests(unittest.TestCase):
         bad, truth, asr, foreign = sim.make(seed=1)
         p = pipeline.process(bad, asr, "en", sim.fake_embed(foreign), tidy=False)
         self.assertTrue(p.res.ok, p.res.reason)
-        self.assertEqual(len(p.lines), len(bad))
-        err = np.abs(np.array([l.start for l in p.lines]) - np.array(truth))
+        # only a sound description that would flash by joins its dialogue (1.4.1)
+        self.assertLessEqual(len(bad) - len(p.lines), 10)
+        start_of = {}
+        for l, d in zip(p.lines, p.details):
+            for c in d["from_cues"]:
+                start_of.setdefault(c - 1, l.start)
+        err = np.abs(np.array([start_of[k] for k in range(len(bad))]) - np.array(truth))
         self.assertGreaterEqual(float(np.mean(err < 0.3)), 0.95)
         self.assertEqual(p.stats["subtitles_before"], len(bad))
-        self.assertEqual(p.stats["subtitles_after"], len(bad))
+        self.assertEqual(p.stats["subtitles_after"], len(p.lines))
         self.assertGreater(p.stats["word_timed"], 0.5 * len(bad))
         self.assertEqual(len(p.details), len(p.lines))
         self.assertEqual(set(p.details[0]), {"n", "from_cues", "orig_start", "start", "end", "words", "matched", "changes"})
@@ -253,8 +258,10 @@ class ProcessTests(unittest.TestCase):
             rows = l.text.split("\n")
             self.assertLessEqual(len(rows), 2, l.text)
             self.assertTrue(all(len(r) <= 42 for r in rows), l.text)
+        from subsync.align import MIN_SHOW
         for a, b in zip(p.lines, p.lines[1:]):
-            self.assertLessEqual(a.end, b.start + 1e-6)
+            # no overlaps, except a line kept on screen for MIN_SHOW so it can be seen (1.4.1)
+            self.assertTrue(a.end <= b.start + 1e-6 or a.end - a.start <= MIN_SHOW + 1e-6, (a, b))
         self.assertNotEqual(p.stats["subtitles_after"], p.stats["subtitles_before"])
         self.assertEqual(p.stats["subtitles_after"], len(p.lines))
         words_of = lambda ls: collections.Counter(t.norm for t in W.tokenize(ls) if t.kind == "word")
@@ -271,10 +278,13 @@ class ProcessTests(unittest.TestCase):
         p = pipeline.process(bad, asr, "da", sim.fake_embed(foreign), tidy=True)
         self.assertTrue(p.res.ok)
         self.assertTrue(all(len(l.text.split("\n")) <= 2 for l in p.lines))
-        out = {(l.start, l.end, l.text) for l in p.lines}
+        from subsync.align import MIN_SHOW
+        out = {(l.start, l.text): l.end for l in p.lines}
         for l in p.res.lines:
-            if len(l.text.split("\n")) <= 2:
-                self.assertIn((l.start, l.end, l.text), out)  # unsplit cues keep today's timing
+            if len(l.text.split("\n")) <= 2 and l.end - l.start >= MIN_SHOW:
+                self.assertEqual(out.get((l.start, l.text)), l.end)  # unsplit cues keep today's timing
+            elif len(l.text.split("\n")) <= 2:  # too short to be seen: same start, shown longer (1.4.1)
+                self.assertTrue(any(k[0] == l.start and l.text in k[1] and e >= l.end for k, e in out.items()), l)
         self.assertGreater(p.stats["split"], 0)
 
     def test_details_write_and_prune(self):

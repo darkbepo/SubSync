@@ -43,10 +43,13 @@ def parse_srt(text: str) -> list[Line]:
     for k, (i, m) in enumerate(marks):
         stop = marks[k + 1][0] if k + 1 < len(marks) else len(rows)
         body = rows[i + 1:stop]
-        # drop the next block's index number and trailing blank lines
+        # drop the next block's index number and trailing blank lines. The number must follow
+        # a blank row or be the expected next number, so a text row that is only a number
+        # ("1985") in a file without numbering is kept
         while body and not body[-1].strip():
             body.pop()
-        if k + 1 < len(marks) and body and body[-1].strip().isdigit():
+        if (k + 1 < len(marks) and body and body[-1].strip().isdigit()
+                and (len(body) == 1 or not body[-2].strip() or body[-1].strip() == str(k + 2))):
             body.pop()
             while body and not body[-1].strip():
                 body.pop()
