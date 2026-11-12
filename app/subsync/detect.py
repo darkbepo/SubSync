@@ -22,6 +22,8 @@ MAX_WINDOWS = 10     # at most 5 minutes of audio is decoded
 WHOLE_FILE = 330.0   # shorter videos are decoded completely
 MIN_SPEECH = 3.0     # less speech than this is "no speech found"
 PIECE = 30.0         # Whisper looks at 30 s at a time
+LOAD_LIMIT = 300.0   # seconds the speech process may take to load the model ...
+PIECE_LIMIT = 60.0   # ... plus this per 30 s piece, before detect gives up on it
 
 
 def window_starts(dur: float, n: int = MAX_WINDOWS) -> list[float]:
@@ -55,7 +57,7 @@ def speech_regions(audio: np.ndarray) -> list[tuple[int, int]]:
 def sample_speech(path: str, audio_n: int, dur: float, seconds: float, progress=lambda f: None):
     """Up to `seconds` of speech from the video, as a list of <= 30 s pieces (float32 16 kHz)
     for language detection, plus the seconds of speech found and of audio decoded."""
-    from .media import decode, decode_window
+    from .media import SeekError, decode, decode_window
 
     speech: list[np.ndarray] = []
     have = 0.0
@@ -70,22 +72,32 @@ def sample_speech(path: str, audio_n: int, dur: float, seconds: float, progress=
             speech.append(part)
             have += len(part) / SR
 
-    if not dur or dur <= WHOLE_FILE:
+    if dur and dur <= WHOLE_FILE:
         audio = decode(path, audio_n)
         decoded = len(audio) / SR
-        if dur and dur > 60:  # skip the intro, as for long videos
+        if dur > 60:  # skip the intro, as for long videos
             audio = audio[int(0.05 * dur * SR):]
         progress(1.0)
         take(audio)
     else:
-        starts = window_starts(dur)
-        for k, t in enumerate(starts):
-            audio = decode_window(path, audio_n, t, WINDOW)
+        starts = window_starts(dur) if dur else []
+        try:
+            for k, t in enumerate(starts):
+                audio = decode_window(path, audio_n, t, WINDOW, must_seek=True)
+                decoded += len(audio) / SR
+                take(audio)
+                progress((k + 1) / len(starts) if have < seconds else 1.0)
+                if have >= seconds:
+                    break
+        except SeekError:
+            starts = []  # this file can't be jumped into: one read through a stretch of it instead
+        if not starts:
+            # unknown length, or no jumping: 5 minutes of audio in one pass (after the intro when
+            # the length is known), never the whole file
+            audio = decode_window(path, audio_n, 0.05 * dur if dur else 0.0, MAX_WINDOWS * WINDOW)
             decoded += len(audio) / SR
             take(audio)
-            progress((k + 1) / len(starts) if have < seconds else 1.0)
-            if have >= seconds:
-                break
+            progress(1.0)
     return pieces(speech), round(have, 1), round(decoded, 1)
 
 
@@ -206,14 +218,24 @@ class Detector:
         import queue
 
         req = {"pieces": speech_pieces, **about}
+        limit = LOAD_LIMIT + PIECE_LIMIT * len(speech_pieces)
         self.req_q.put(req)
+        deadline = time.time() + limit
         while True:
             try:
                 msg = self.res_q.get(timeout=1.0)
             except queue.Empty:
-                if self.proc.is_alive():
+                msg = None
+                if not self.proc.is_alive():
+                    try:  # it may have answered just before it ended
+                        msg = self.res_q.get_nowait()
+                    except queue.Empty:
+                        msg = ("fatal", f"speech recognition stopped unexpectedly (code {self.proc.exitcode})",
+                               not self.force_cpu)
+                elif time.time() > deadline:
+                    msg = ("fatal", f"speech recognition did not answer within {limit:.0f} s", not self.force_cpu)
+                if msg is None:
                     continue
-                msg = ("fatal", f"speech recognition stopped unexpectedly (code {self.proc.exitcode})", not self.force_cpu)
             kind = msg[0]
             if kind == "device":
                 _, dev, self.name, self.load_s = msg
@@ -225,23 +247,28 @@ class Detector:
                 return msg[1]
             elif kind == "fatal":
                 text, gpu = msg[1], msg[2]
-                self.log("detect: speech recognition failed: " + text.strip().splitlines()[-1])
+                last = text.strip().splitlines()[-1]
+                self.log("detect: speech recognition failed: " + last)
                 if gpu and not self.force_cpu:
-                    self.gpu_problem = text.strip().splitlines()[-1]
+                    self.gpu_problem = last
                     self.log("detect: switching to the CPU")
                     self.stop()
                     self.force_cpu = True
                     self.device = self.name = self.load_s = None
                     self._start()
                     self.req_q.put(req)
+                    deadline = time.time() + limit
                     continue
-                raise RuntimeError(text.strip().splitlines()[-1])
+                raise RuntimeError(last)
 
     def stop(self):
         try:
             self.req_q.put(None)
         except Exception:
             pass
+        # a worker that never read its request leaves the queue's writer thread blocked on the
+        # pipe; don't let it hold up this process's exit
+        self.req_q.cancel_join_thread()
         p = self.proc
         if p.is_alive():
             p.join(0.5)

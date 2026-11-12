@@ -119,26 +119,42 @@ def decode(path: str, audio_n: int, cancelled=lambda: False) -> np.ndarray:
     return _mix(chunks, names, centre)
 
 
-def decode_window(path: str, audio_n: int, start: float, length: float) -> np.ndarray:
-    """Decode length seconds of one audio track from start (seconds), like decode().
-    Jumps there when the file allows it, otherwise reads up to it. May return less audio
-    near the end of the file, or an empty array."""
+class SeekError(RuntimeError):
+    """The file can't be jumped into (decode_window with must_seek)."""
+
+
+def decode_window(path: str, audio_n: int, start: float, length: float, must_seek: bool = False) -> np.ndarray:
+    """Decode length seconds of one audio track, from start seconds after the track's first
+    sample (the same position as in decode()'s output). Jumps there when the file allows it;
+    otherwise raises SeekError with must_seek, or reads up to it. May return less audio near
+    the end of the file, or an empty array.
+
+    Timestamps in a file need not start at zero (TV recordings often start at hours), so the
+    track's own start time is added for the jump and taken off every frame's time."""
     import av
 
     with av.open(path) as c:
         st = c.streams.audio[audio_n]
         st.thread_type = "AUTO"
         res, names, centre = _resampler(st)
+        if st.start_time is not None and st.time_base:
+            base = float(st.start_time * st.time_base)
+        elif c.start_time is not None:
+            base = c.start_time / 1_000_000
+        else:
+            base = 0.0
         if start > 0:
             try:
-                c.seek(int(start * 1_000_000), any_frame=False, backward=True)  # container time base (µs)
-            except Exception:
-                pass  # can't jump: decode from the start and skip what comes before
+                c.seek(int((base + start) * 1_000_000), any_frame=False, backward=True)  # µs, absolute
+            except Exception as e:
+                if must_seek:
+                    raise SeekError(str(e)) from e
+                # can't jump: decode from the start and skip what comes before
         chunks = []
         have = 0
         need = int(length * 16000)
         for frame in c.decode(st):
-            t = frame.time
+            t = None if frame.time is None else frame.time - base
             if t is not None and t + frame.samples / (frame.sample_rate or 16000) <= start:
                 continue
             frame.pts = None

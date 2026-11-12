@@ -11,6 +11,9 @@ def detect_worker(req_q, res_q, force_cpu):
     req = req_q.get()
     if req is None:
         return
+    if os.environ.get("SUBSYNC_FAKE_DETECT_HANG") and not force_cpu:
+        import time
+        time.sleep(3600)  # like a stuck GPU driver
     try:
         m = json.load(open(req["path"] + ".lang.json"))
     except OSError:

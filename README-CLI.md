@@ -172,7 +172,7 @@ subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90]
 | `--cpu` | Don't use the NVIDIA GPU. |
 | `--progress` | `PROGRESS {json}` lines before the answer, as in `sync`: stage `reading_audio`, then `listening`, each with `percent`. |
 
-**What it does:** it reads 30-second pieces spread over the video (the first 5 % is skipped for intros and logos; videos under about 5½ minutes are read completely), keeps only the parts with voice, and stops once it has `--seconds` of speech, or after 10 pieces (5 minutes of audio). Whisper's language detection then runs on that speech; the answer is the language with the highest probability, averaged over the 30-second stretches of speech. Nothing is transcribed or matched.
+**What it does:** it reads 30-second pieces spread over the video (the first 5 % is skipped for intros and logos; videos under about 5½ minutes are read completely), keeps only the parts with voice, and stops once it has `--seconds` of speech, or after 10 pieces (5 minutes of audio). If the video's length isn't stored in the file, or the file can't be jumped into, it reads 5 minutes of audio in one go instead (after the intro when the length is known), never the whole video. TV recordings whose timestamps don't start at zero are handled. Whisper's language detection then runs on that speech; the answer is the language with the highest probability, averaged over the 30-second stretches of speech. Nothing is transcribed or matched.
 
 **Read-only:** nothing is created or changed next to the video, and the transcript cache and `settings.json` are not touched. Only `logs\cli.log` and `logs\worker.log` get lines.
 
@@ -191,7 +191,7 @@ subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90]
 | `language` | The spoken language as Whisper's code, two letters for nearly every language (`"en"`, `"da"`, …; a few have three, such as `"haw"`), the same codes as `audio_language` in the sync report. `null` if no speech was found or the video can't be read. |
 | `probability` | How sure Whisper is, 0–1. `null` together with `language`. |
 | `speech_seconds` | Seconds of speech the answer is based on. |
-| `device` | `gpu` or `cpu`; `null` if the speech model wasn't needed (no speech found). If the GPU can't be used (for example it is full because `serve` is using it), `detect` switches to the CPU: slower, but it still answers, and `gpu_problem` says what happened. |
+| `device` | `gpu` or `cpu`; `null` if the speech model wasn't needed (no speech found). If the GPU can't be used (for example it is full because `serve` is using it, or it doesn't answer within 5 minutes plus 1 minute per 30 s of speech), `detect` switches to the CPU: slower, but it still answers, and `gpu_problem` says what happened. |
 | `model_load_seconds` | How long the speech model took to load. |
 | `seconds` | Time from SubSync's Python start to the answer (the launcher's self-check before it is not included). |
 | `reason` | Only when `language` is `null`: `"no speech found"`, `"no audio track"`, or why the video can't be read. |

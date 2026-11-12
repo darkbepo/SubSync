@@ -57,11 +57,13 @@ class Seek(unittest.TestCase):
         cls.v = {}
         # 8 minutes of pink noise: every stretch of audio is different, so an offset can't hide
         src = "anoisesrc=d=480:c=pink:r=48000:a=0.3:seed=7"
-        for ext, codec in (("mkv", "aac"), ("mp4", "aac"), ("avi", "libmp3lame")):
+        for ext, codec, extra in (("mkv", "aac", []), ("mp4", "aac", []), ("avi", "libmp3lame", []),
+                                  ("ts", "aac", []), ("offset.ts", "aac", ["-output_ts_offset", "3000"])):
+            # offset.ts: timestamps start at 50 minutes, as in many TV recordings
             f = os.path.join(cls.d, "chirp." + ext)
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=32x32:r=2",
                             "-f", "lavfi", "-i", src, "-c:v", "libx264", "-preset", "ultrafast", "-c:a", codec,
-                            "-shortest", f], check=True)
+                            "-shortest", *extra, f], check=True)
             cls.v[ext] = f
 
     @classmethod
@@ -89,6 +91,63 @@ class Seek(unittest.TestCase):
                 # in the right place: up to an AAC frame or so (the codec's start-up delay is handled
                 # differently after a jump); detect only needs roughly the right part of the video
                 self.assertLessEqual(abs(best), 1600, (ext, start, best))  # within 0.1 s
+
+
+    def test_unknown_length_and_no_jumping_read_at_most_5_minutes(self):
+        from subsync import media
+        f = self.v["mkv"]
+        _, _, decoded = det.sample_speech(f, 0, 0.0, 90)  # length unknown
+        self.assertLessEqual(decoded, 300.5)
+        real = media.decode_window
+
+        def no_seek(path, n, start, length, must_seek=False):
+            if must_seek and start > 0:
+                raise media.SeekError("can't seek")
+            return real(path, n, start, length)
+        media.decode_window = no_seek
+        try:
+            _, _, decoded = det.sample_speech(f, 0, 480.0, 90)
+        finally:
+            media.decode_window = real
+        self.assertLessEqual(decoded, 300.5)
+        self.assertGreater(decoded, 200)
+
+
+_RUN = """
+import os, sys
+sys.path[:0] = [{app!r}, {tests!r}]
+import fake_detect, numpy as np
+from subsync import detect as det
+det.detect_worker = fake_detect.detect_worker
+det.LOAD_LIMIT, det.PIECE_LIMIT = 3, 1
+d = det.Detector(False)
+with open({path!r} + ".lang.json", "w") as f: f.write('{{"*": "da"}}')
+r = d.run([np.zeros(16000 * 20, np.float32)] * 3, path={path!r}, track=1)
+print(det.combine(r)[0], d.device, d.gpu_problem)
+d.stop()
+"""  # ends normally (not os._exit), so a stuck queue thread would hang it
+
+
+class Worker(unittest.TestCase):
+    def run_detector(self, env):
+        d = tempfile.mkdtemp()
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            code = _RUN.format(app=os.path.join(os.path.dirname(here), "app"), tests=here, path=os.path.join(d, "v.mkv"))
+            p = subprocess.run([sys.executable, "-c", code], env=dict(os.environ, **env), capture_output=True,
+                               text=True, timeout=60)
+            return p.returncode, p.stdout.strip(), p.stderr[-1500:]
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_gpu_full_falls_back_and_exits_normally(self):
+        code, out, err = self.run_detector({"SUBSYNC_FAKE_DETECT_GPU_OOM": "1"})
+        self.assertEqual((code, out.split()[:2]), (0, ["da", "cpu"]), err)
+
+    def test_stuck_gpu_worker_times_out_and_falls_back(self):
+        code, out, err = self.run_detector({"SUBSYNC_FAKE_DETECT_HANG": "1"})
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith("da cpu") and "did not answer" in out, out)
 
 
 if __name__ == "__main__":
