@@ -2,6 +2,8 @@
 
     subsync-cli sync <files or folders...> [--pair VIDEO SUBTITLE] [--suffix en|eng]
                      [--overwrite] [--keep-layout] [--cpu] [--report FILE.json]
+                     [--output FILE.srt] [--progress]
+    subsync-cli serve [--suffix en|eng] [--overwrite] [--keep-layout] [--cpu]
 
 Exit codes: see EXIT_* below and README-CLI.md.
 """
@@ -14,6 +16,8 @@ import queue
 import sys
 import time
 import traceback
+
+VERSION = "1.3.0"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video
@@ -329,7 +333,7 @@ def write_report(path, items, skipped, code, seconds, speech=None):
     if not path:
         return
     rep = {
-        "subsync_version": "1.3.0",
+        "subsync_version": VERSION,
         "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": code,
         "seconds": round(seconds, 1),
@@ -346,6 +350,171 @@ def write_report(path, items, skipped, code, seconds, speech=None):
         out(f"Could not write the report {path}: {e}")
 
 
+# ---------------------------------------------------------------- serve
+def serve(argv):
+    """subsync-cli serve: stay running for another program. Requests come in on stdin and
+    events go out on stdout, one JSON object per line (README-CLI.md, "serve"). The models
+    stay loaded between items and items overlap (the next one's audio is read while the
+    current one is listened to). Ends after stdin is closed and every item is finished."""
+    import threading
+
+    from subsync import settings as gui_settings
+    from subsync.media import VIDEO_EXTS
+    from subsync.pipeline import Engine
+    from subsync.subtitles import SUB_EXTS
+
+    p = Parser(prog="subsync-cli serve", add_help=False)
+    p.add_argument("--suffix", choices=["en", "eng", ".en", ".eng"], default="en")
+    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--keep-layout", action="store_true")
+    p.add_argument("--cpu", action="store_true")
+    args = p.parse_args(argv)
+
+    lock = threading.Lock()
+
+    def emit(obj):
+        with lock:
+            sys.stdout.write(json.dumps(obj, ensure_ascii=True, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
+
+    events: "queue.Queue" = queue.Queue()
+    settings = {"suffix": "." + args.suffix.lstrip("."), "overwrite": args.overwrite, "tidy": not args.keep_layout,
+                "gpu_batch": gui_settings.load().get("gpu_batch", 0)}
+    engine = Engine(lambda jid, kind, data: events.put(("engine", jid, kind, data)), lambda: settings)
+    engine.force_cpu = args.cpu
+    engine.warm_up()
+
+    def read_stdin():
+        for line in sys.stdin:
+            events.put(("line", line))
+        events.put(("eof",))
+
+    threading.Thread(target=read_stdin, daemon=True).start()
+    log(f"serve: ready (suffix {settings['suffix']}, overwrite {args.overwrite}, tidy {settings['tidy']}, cpu {args.cpu})")
+    emit({"event": "ready", "subsync_version": VERSION})
+
+    pending = {}   # engine job number -> request (id, video, subtitle, output, t0)
+    shown = {}     # job number -> (stage, percent) last emitted
+    stage_of = {}  # job number -> current stage code
+    next_n = 0
+    stdin_open = True
+
+    def result(req, **fields):
+        emit({"event": "result", "id": req["id"], "video": req.get("video"), "subtitle": req.get("subtitle")} | fields)
+
+    def check(req):
+        """Reason a request can't run, or None."""
+        for key, kind, exts in (("video", "video", VIDEO_EXTS), ("subtitle", "subtitle", SUB_EXTS)):
+            f = req.get(key)
+            if not isinstance(f, str) or not f:
+                return f"missing \"{key}\""
+            if not os.path.isfile(f):
+                return f"{kind} not found: {f}"
+            if os.path.splitext(f)[1].lower() not in exts:
+                return f"{kind} has an unsupported type: {f}"
+        o = req.get("output")
+        if o is not None:
+            if not isinstance(o, str) or os.path.splitext(o)[1].lower() != ".srt":
+                return "\"output\" must be a .srt file"
+            if not os.path.isdir(os.path.dirname(o)):
+                return f"output folder not found: {os.path.dirname(o)}"
+            if os.path.exists(o) and not args.overwrite:
+                return f"output exists: {o} (start serve with --overwrite to replace files)"
+        if any(r["id"] == req["id"] for r in pending.values()):
+            return f"id {req['id']!r} is already in progress"
+        return None
+
+    while stdin_open or pending:
+        ev = events.get()
+        if ev[0] == "eof":
+            stdin_open = False
+            log("serve: input closed")
+            continue
+        if ev[0] == "line":
+            line = ev[1].strip().lstrip("\ufeff")
+            if not line:
+                continue
+            try:
+                req = json.loads(line)
+                if not isinstance(req, dict):
+                    raise ValueError("not a JSON object")
+            except ValueError as e:
+                log(f"serve: bad request line: {line[:300]}")
+                emit({"event": "result", "id": None, "status": "failed", "reason": f"not a valid request: {e}"})
+                continue
+            next_n += 1
+            req.setdefault("id", next_n)
+            for key in ("video", "subtitle", "output"):
+                if isinstance(req.get(key), str):
+                    req[key] = os.path.abspath(req[key])
+            problem = check(req)
+            if problem:
+                log(f"serve: request {req['id']!r} refused: {problem}")
+                result(req, status="failed", reason=problem)
+                continue
+            req["t0"] = time.time()
+            pending[next_n] = req
+            log(f"serve: [#{next_n}] {os.path.basename(req['video'])} <- {os.path.basename(req['subtitle'])}")
+            engine.submit(next_n, req["video"], req["subtitle"], req.get("output"))
+            continue
+
+        _, jid, kind, data = ev
+        if jid is None:
+            if kind == "device":
+                st = data.get("state")
+                if st == "ready":
+                    dev = "gpu" if data["device"] == "cuda" else "cpu"
+                    log(f"serve: speech recognition {dev} {data.get('name') or ''}".rstrip()
+                        + (f", loaded in {data['load_s']:.1f} s" if data.get("load_s") is not None else ""))
+                    emit({"event": "device", "device": dev, "name": data.get("name") or None,
+                          "model_load_seconds": data.get("load_s")})
+                elif st == "error":
+                    log("serve: " + data.get("text", "speech recognition problem"))
+                    if data.get("detail"):
+                        log(data["detail"])
+                    emit({"event": "warning", "text": data.get("text", "speech recognition problem")})
+            elif kind == "batch":
+                gui_settings.update(gpu_batch=int(data))
+            continue
+        req = pending.get(jid)
+        if req is None:
+            continue
+        if kind == "stage":
+            stage_of[jid] = stage_code(data)
+            shown[jid] = (stage_of[jid], None)
+            log(f"serve: [#{jid}] {os.path.basename(req['video'])}: {data}")
+            emit({"event": "stage", "id": req["id"], "stage": stage_of[jid], "percent": None})
+        elif kind == "progress":
+            code = stage_of.get(jid, "working")
+            pct = max(0, min(100, int(float(data) * 100)))
+            if shown.get(jid) != (code, pct):
+                shown[jid] = (code, pct)
+                emit({"event": "stage", "id": req["id"], "stage": code, "percent": pct})
+        elif kind in ("done", "warning", "error", "cancelled"):
+            del pending[jid]
+            shown.pop(jid, None)
+            stage_of.pop(jid, None)
+            name = os.path.basename(req["video"])
+            if kind == "done":
+                f = done_fields(data)
+                tm = f["timings"]
+                log(f"serve: [#{jid}] {name}: synced -> {f['output']} ({f['lines_matched']}/{f['lines_with_speech']} lines; "
+                    + ("transcript from cache" if tm["from_cache"] else
+                       f"read audio {tm['read_audio']} s, listen {tm['listen']} s")
+                    + f", match {tm['match']} s, total {f['seconds']} s)")
+                result(req, **f)
+            elif kind == "warning":
+                log(f"serve: [#{jid}] {name}: no match: {data['text']}")
+                result(req, status="no_match", reason=data["text"], audio_language=data.get("lang"))
+            else:
+                reason = data["text"] if isinstance(data, dict) else str(data)
+                log(f"serve: [#{jid}] {name}: {kind}: {reason}")
+                result(req, status="failed" if kind == "error" else "cancelled", reason=reason)
+    engine.shutdown()
+    log("serve: finished")
+    return EXIT_OK
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -358,11 +527,14 @@ if __name__ == "__main__":
     sys.stderr = LOG  # internal warnings/tracebacks go to the log, not the console
     log("C++ runtime: " + ", ".join(paths.preload_vc_runtime()))
     argv = sys.argv[1:]
-    if argv and argv[0] == "sync":
+    run = main
+    if argv and argv[0] == "serve":
+        run, argv = serve, argv[1:]
+    elif argv and argv[0] == "sync":
         argv = argv[1:]
     code = EXIT_INTERNAL
     try:
-        code = main(argv)
+        code = run(argv)
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else EXIT_USAGE
     except KeyboardInterrupt:

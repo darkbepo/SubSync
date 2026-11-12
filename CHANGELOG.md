@@ -11,6 +11,8 @@ Faster starts; the results and the matching are unchanged.
 - **Timings in the logs.** `logs\app.log` shows each start-up step with the seconds since start; `logs\setup.log` gets one line per start ("self-check … ms, window open after … s"); `logs\worker.log` and `logs\cli.log` say how long the speech model took to load; `cli.log` gets each item's read-audio / listen / match seconds.
 - **Command line `--output FILE.srt`:** with exactly one `--pair`, write the result to that file (for example the input subtitle itself, or a name like `.en.hi.srt`).
 - **Command line `--progress`:** machine-readable `PROGRESS {json}` lines on stdout (stage, percent, GPU/CPU, item finished) for programs that run SubSync, such as the Jellyfin plugin.
+- **`subsync-cli serve`:** stays running for another program (pairs in on stdin, results out on stdout, one JSON object per line). Setup check, Python start and model loading happen once instead of per item, and items overlap.
+- The exe's file properties now show the real version (they said 1.0.0).
 - **JSON report:** new `speech_recognition` (GPU or CPU, card name, model load seconds) and, per synced item, `timings`.
 
 ## 1.2.0

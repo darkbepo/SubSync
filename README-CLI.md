@@ -27,6 +27,7 @@ D:\Tools\SubSync\subsync-cli.exe .
 |---|---|
 | `subsync-cli sync <files or folders…> [options]` | Pair videos with subtitles and sync them. |
 | `subsync-cli <files or folders…> [options]` | Shorthand for `sync`. |
+| `subsync-cli serve [options]` | (Since 1.3.0.) Stay running for another program: pairs come in on stdin, results go out on stdout, one JSON object per line. See [`serve`](#serve-for-programs). |
 | `subsync-cli setup` | Download everything (first time) or repair missing/damaged files. |
 | `subsync-cli check` | Report whether the installation is complete and intact. Downloads nothing. |
 | `subsync-cli version` | Print the version. |
@@ -154,6 +155,50 @@ PROGRESS {"event":"item_done","item":1,"total":1,"status":"synced","output":"D:\
 | `item_done` | `item`, `total`, `status` (`synced`, `no_match`, `failed`, `cancelled`, as in the report) and `output` (the written file, or `null`). |
 
 Stages in order: `queued`, `reading_audio`, `listening` (nearly all of the time; `percent` is how much of the soundtrack has been heard, updated every 15 seconds of audio or so), `matching`, and rarely `waiting_for_file` (the existing result is open in another program). With several items, the next item's `reading_audio` starts while the current one is still `listening`. A transcript from the cache goes straight from `queued` to `matching`. New events and fields may be added later; ignore what you don't know.
+
+## `serve` (for programs)
+
+`subsync-cli serve` is for a program that syncs one item at a time and wants each result as soon as it's ready, such as the Jellyfin plugin. Compared with starting `subsync-cli sync` once per item, the self-check, Python start and model loading happen **once**, and items overlap: the next item's audio is read while the current one is listened to.
+
+```bat
+subsync-cli serve --overwrite [--suffix en|eng] [--keep-layout] [--cpu]
+```
+
+The options apply to every item and work as in `sync`. `--overwrite` is needed to write into an existing file, such as the input subtitle itself.
+
+**Input (stdin):** one JSON object per line, UTF-8.
+
+```json
+{"id": "ep-4711", "video": "D:\\Shows\\Show.S01E01.mkv", "subtitle": "D:\\Shows\\Show.S01E01.en.hi.srt", "output": "D:\\Shows\\Show.S01E01.en.hi.srt"}
+```
+
+- `id` is any string or number, and is echoed in every event about the item. Without one, the request's line number is used.
+- `video` and `subtitle` are required. `output` is optional: the exact file to write (as with `--output`), otherwise `<video>.en.srt` with the usual naming rules.
+- SubSync may start on an item as soon as it is received, and writes its result when that item is finished. A program that keeps a backup of the subtitle should make it before sending the request.
+- Sending one item ahead of the one being worked on is enough for the overlap.
+- **Close stdin** when there is nothing more to do: SubSync finishes every item it has received, then exits with `0`. To stop at once, end the process. Items not yet finished are then not written; a result already written stays.
+
+**Output (stdout):** one JSON object per line, flushed immediately.
+
+```
+{"event":"ready","subsync_version":"1.3.0"}
+{"event":"stage","id":"ep-4711","stage":"queued","percent":null}
+{"event":"device","device":"gpu","name":"NVIDIA GeForce RTX 3050","model_load_seconds":6.2}
+{"event":"stage","id":"ep-4711","stage":"reading_audio","percent":null}
+{"event":"stage","id":"ep-4711","stage":"listening","percent":37}
+{"event":"stage","id":"ep-4711","stage":"matching","percent":50}
+{"event":"result","id":"ep-4711","video":"…","subtitle":"…","status":"synced","output":"…","lines_matched":612,…,"timings":{…}}
+```
+
+| Event | Meaning |
+|---|---|
+| `ready` | Requests are accepted (the models are still loading; requests sent now simply wait). |
+| `device` | Speech recognition is ready, as in `--progress`, plus `model_load_seconds`. Comes again if a GPU problem switches to the CPU. |
+| `warning` | `text`: a problem that doesn't stop the work, for example the GPU fallback. |
+| `stage` | As in `--progress`, with `id` instead of `item`. |
+| `result` | The item is finished. `status` and the other fields are those of a report item (`synced`, `no_match`, `failed`). A request that can't run (bad JSON, missing file, `output` exists without `--overwrite`, an `id` already in progress) gets a `result` with `status` `failed` and a `reason` straight away; its `id` is `null` if the line couldn't be read. |
+
+Lines before `ready` can be setup or repair messages from the self-check (plain text). Ignore any line that doesn't start with `{`. New events and fields may be added later; ignore what you don't know. Exit codes: `0` (stdin closed, all done), `6` (bad option), `7` (setup/repair not possible), `9` (Ctrl+C), `10` (unexpected error). Details go to `logs\cli.log` as `serve:` lines.
 
 ## Logs
 

@@ -37,6 +37,8 @@ const cliHelp = `SubSync command line ` + appVersionString + `
 Usage:
   subsync-cli sync <files or folders...> [options]   sync subtitles to their videos
   subsync-cli <files or folders...> [options]        (same as sync)
+  subsync-cli serve [options]                        keep running for another program: pairs in on
+                                                     stdin, results out on stdout (JSON lines, README-CLI.md)
   subsync-cli setup                                  download / repair SubSync's files
   subsync-cli check                                  report whether the installation is intact
   subsync-cli version
@@ -85,6 +87,8 @@ func cliMain(args []string) int {
 		return cliSetup(true)
 	case "sync":
 		return cliSync(args[1:])
+	case "serve":
+		return cliRun("serve", args[1:])
 	}
 	if _, err := os.Stat(args[0]); err == nil || strings.HasPrefix(args[0], "--") {
 		return cliSync(args) // "subsync-cli D:\Shows\Season 1"
@@ -195,7 +199,10 @@ func consoleInstall(m *manifest, gpu bool) error {
 	return err
 }
 
-func cliSync(args []string) int {
+func cliSync(args []string) int { return cliRun("sync", args) }
+
+// cliRun prepares the installation, then runs app\cli.py <command> <args...>.
+func cliRun(command string, args []string) int {
 	if code := prepare(false); code != exitOK {
 		return code
 	}
@@ -203,7 +210,7 @@ func cliSync(args []string) int {
 	if !fileExists(py) {
 		py = filepath.Join(pyDir(), "pythonw.exe")
 	}
-	cmd := exec.Command(py, append([]string{"-X", "utf8", filepath.Join(root, "app", "cli.py"), "sync"}, args...)...)
+	cmd := exec.Command(py, append([]string{"-X", "utf8", filepath.Join(root, "app", "cli.py"), command}, args...)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if wd, err := os.Getwd(); err == nil {
 		cmd.Dir = wd // relative paths on the command line keep working

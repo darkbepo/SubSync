@@ -41,6 +41,7 @@ check "Python taken from the NuGet layout (no pythonw.exe)"      '[ -f runtime/p
 check "one consistent C++ runtime set applied after Python"      '[ "$(cat runtime/python/vcruntime140.dll)" = NEW ]'
 check "GPU DLLs extracted, nvblas skipped"                       '[ -f runtime/cuda/cudnn_ops64_9.dll ] && [ ! -e runtime/cuda/nvblas64_12.dll ]'
 check "models pinned to an exact revision"                       'grep -q aaaa1111 runtime/models.lock.json && grep -q cccc3333 runtime/models.lock.json'
+check "setup precompiled the Python libraries"                 'grep -q compileall precompiled.txt && grep -q site-packages precompiled.txt'
 check "nothing left running after the app closes"                settle
 
 echo "== B. start with an intact install"

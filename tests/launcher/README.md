@@ -9,11 +9,11 @@ WORK=/tmp/other-dir tests/launcher/run.sh
 
 Needs Linux with `wine` (64-bit), `Xvfb`, Go ≥ 1.24 and `python3`. It creates its own Wine prefix in the work folder, and installs a dummy `nvcuda.dll` there so the GPU path is exercised.
 
-## What it covers (28 checks)
+## What it covers (29 checks)
 
 | | Scenario |
 |---|---|
-| A | First install with **every primary link dead**: Python comes from the NuGet layout (no `pythonw.exe`), libraries from the package index, models from the HF host. Also checks the C++ runtime set, GPU DLL extraction and model pinning. |
+| A | First install with **every primary link dead**: Python comes from the NuGet layout (no `pythonw.exe`), libraries from the package index, models from the HF host. Also checks the C++ runtime set, GPU DLL extraction, model pinning and that setup precompiles the libraries. |
 | B | An intact install starts without downloading anything. |
 | C | A deleted library file, a truncated GPU DLL, a deleted model file and a deleted app file are each repaired. Nothing intact is downloaded again. |
 | D | The pinned model repository disappears, so the model is re-installed from the backup repository and the lock is updated. |
@@ -27,7 +27,7 @@ Needs Linux with `wine` (64-bit), `Xvfb`, Go ≥ 1.24 and `python3`. It creates 
 | `run.sh` | Builds everything, starts the fake server, runs the scenarios. |
 | `make_fixtures.py` | Fake downloads (Python, wheels with real `RECORD` files, a GPU wheel, three model repos), a test manifest whose primary links are all dead, and `sources.json`. |
 | `fake_server.py` | Python host, PEP 503 index and Hugging Face API, with HTTP Range support. Logs every request to `<work>/requests.log`. Repositories listed in `<work>/gone.txt` answer 404. |
-| `fake_app/` | Stand-in for `python(w).exe`. Its behaviour is chosen by `<root>/mode.txt`: `normal`, `stay`, `crash` or `exitN`. |
+| `fake_app/` | Stand-in for `python(w).exe`. Its behaviour is chosen by `<root>/mode.txt`: `normal`, `stay`, `crash` or `exitN`. Started with `-m compileall` (setup's precompile step) it writes `<root>/precompiled.txt` and exits. |
 
 ## Limits
 

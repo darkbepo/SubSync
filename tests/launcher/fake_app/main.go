@@ -1,9 +1,12 @@
 // Stand-in for runtime\python\python(w).exe in launcher tests. It never runs
 // Python; it imitates the app's observable behaviour, chosen by <root>\mode.txt:
-//   normal   start a helper process, signal "window ready", exit after 4 s
-//   stay     like normal, but keep running (to test killing the launcher)
-//   crash    start a helper, then die with an access violation before "ready"
-//   exitN    print the arguments + working directory, exit with code N (CLI passthrough)
+//
+//	normal   start a helper process, signal "window ready", exit after 4 s
+//	stay     like normal, but keep running (to test killing the launcher)
+//	crash    start a helper, then die with an access violation before "ready"
+//	exitN    print the arguments + working directory, exit with code N (CLI passthrough)
+//
+// "-m compileall ..." (setup's precompile step) writes <root>\precompiled.txt and exits at once.
 // "--helper" = the child process (like the speech worker) that must never be left behind.
 package main
 
@@ -23,6 +26,12 @@ func main() {
 		return
 	}
 	root := os.Getenv("SUBSYNC_ROOT")
+	for _, a := range os.Args[1:] {
+		if a == "compileall" { // setup's precompile step: leave a marker and finish like Python would
+			_ = os.WriteFile(filepath.Join(root, "precompiled.txt"), []byte(strings.Join(os.Args[1:], " ")), 0o644)
+			return
+		}
+	}
 	b, _ := os.ReadFile(filepath.Join(root, "mode.txt"))
 	mode := strings.TrimSpace(string(b))
 	if strings.HasPrefix(mode, "exit") {
