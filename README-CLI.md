@@ -92,11 +92,12 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 
 ```json
 {
-  "subsync_version": "1.2.0",
+  "subsync_version": "1.3.0",
   "finished": "2026-11-08T20:19:27",
   "exit_code": 3,
   "seconds": 252.4,
   "summary": { "synced": 1, "no_match": 1, "failed": 1, "cancelled": 0, "skipped": 1 },
+  "speech_recognition": { "device": "gpu", "name": "NVIDIA GeForce RTX 3050", "model_load_seconds": 6.2 },
   "items": [
     {
       "video": "D:\\Shows\\Show.S01E01.1080p.mkv",
@@ -116,7 +117,8 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
       "subtitles_after": 655,
       "joined": 120,
       "split": 107,
-      "capitals_fixed": 85
+      "capitals_fixed": 85,
+      "timings": { "from_cache": false, "read_audio": 9.8, "listen": 58.1, "match": 4.2 }
     },
     { "video": "…S01E02…", "subtitle": "…", "status": "no_match",
       "reason": "Only 9 of 655 lines matched the audio – wrong subtitle for this video?", "audio_language": "en" },
@@ -127,6 +129,8 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 ```
 
 `status` is one of `synced`, `no_match`, `failed`, `cancelled` (Ctrl+C) or `skipped` (no partner file). For synced items, `tidy` says whether *Tidy up lines* was on; `joined` counts new subtitles made from several original ones, `split` counts original subtitles spread over several new ones.
+
+`speech_recognition` (since 1.3.0) says what listened: `device` is `gpu` or `cpu` (a GPU problem during the run switches to `cpu`, and the report says so), `name` is the graphics card, `model_load_seconds` how long the speech model took to load. It is `null` when nothing had to be listened to, for example when every transcript came from the cache. `timings` (since 1.3.0, synced items) gives the seconds spent reading the audio, listening and matching; `from_cache: true` means the transcript was remembered from an earlier run, so `read_audio` and `listen` are `null`.
 
 ## Logs
 

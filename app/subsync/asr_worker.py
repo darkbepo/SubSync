@@ -87,34 +87,16 @@ def worker_main(req_q, res_q, cancel_ev, force_cpu: bool, batch_hint: int):
     log.write(f"\n=== worker start {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
     log.write("C++ runtime: " + ", ".join(paths.preload_vc_runtime()) + "\n")
     send = res_q.put
+    t_start = time.time()
     try:
         dll_errors = [] if force_cpu else paths.preload_cuda()
         log.write(f"CUDA libraries: {'skipped (CPU)' if force_cpu else (dll_errors or 'ok')}\n")
         import ctranslate2
+        import onnxruntime  # noqa: F401  (voice detection; imported here, not first inside the prefetch thread)
         from faster_whisper import BatchedInferencePipeline, WhisperModel
         from faster_whisper.vad import VadOptions, get_speech_timestamps
 
         from .media import decode
-
-        device = "cpu"
-        if not force_cpu and ctranslate2.get_cuda_device_count() > 0:
-            device = "cuda"
-        gpu_name, free = _vram_info() if device == "cuda" else (None, None)
-        if device == "cuda":
-            model = WhisperModel(paths.WHISPER_DIR, device="cuda", compute_type="int8_float16")
-            if batch_hint:
-                batch = batch_hint
-            elif free:
-                gb = free / 2**30
-                batch = 16 if gb >= 6 else 8 if gb >= 3.5 else 4 if gb >= 2.2 else 2
-            else:
-                batch = 8
-        else:
-            threads = max(1, (os.cpu_count() or 4))
-            model = WhisperModel(paths.WHISPER_DIR, device="cpu", compute_type="int8", cpu_threads=threads)
-            batch = 4
-        pipe = BatchedInferencePipeline(model)
-        send(("device", device, gpu_name or "", batch, dll_errors))
     except Exception:
         send(("fatal", traceback.format_exc()))
         return
@@ -140,7 +122,35 @@ def worker_main(req_q, res_q, cancel_ev, force_cpu: bool, batch_hint: int):
             except Exception as e:
                 ready.put((job, None, f"Could not read the audio: {e}", 0))
 
+    # the first episode's audio is read while the speech model loads (both take seconds)
     threading.Thread(target=prefetch, daemon=True).start()
+
+    try:
+        device = "cpu"
+        if not force_cpu and ctranslate2.get_cuda_device_count() > 0:
+            device = "cuda"
+        gpu_name, free = _vram_info() if device == "cuda" else (None, None)
+        t_model = time.time()
+        if device == "cuda":
+            model = WhisperModel(paths.WHISPER_DIR, device="cuda", compute_type="int8_float16")
+            if batch_hint:
+                batch = batch_hint
+            elif free:
+                gb = free / 2**30
+                batch = 16 if gb >= 6 else 8 if gb >= 3.5 else 4 if gb >= 2.2 else 2
+            else:
+                batch = 8
+        else:
+            threads = max(1, (os.cpu_count() or 4))
+            model = WhisperModel(paths.WHISPER_DIR, device="cpu", compute_type="int8", cpu_threads=threads)
+            batch = 4
+        pipe = BatchedInferencePipeline(model)
+        load_s = time.time() - t_start
+        log.write(f"speech model ready on {device} in {load_s:.1f} s (model {time.time() - t_model:.1f} s)\n")
+        send(("device", device, gpu_name or "", batch, dll_errors, round(load_s, 2)))
+    except Exception:
+        send(("fatal", traceback.format_exc()))
+        return
 
     while True:
         item = ready.get()

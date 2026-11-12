@@ -9,9 +9,13 @@ import traceback
 LOG = None
 
 
+T0 = time.perf_counter()
+
+
 def step(msg):
+    """One start-up step in logs\\app.log, with the seconds since Python started."""
     if LOG:
-        LOG.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+        LOG.write(f"{time.strftime('%H:%M:%S')} +{time.perf_counter() - T0:.2f}s {msg}\n")
         LOG.flush()
 
 

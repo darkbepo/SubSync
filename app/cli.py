@@ -68,7 +68,16 @@ def done_fields(data) -> dict:
             "endings_extended": sum(data["ends"][:2]), "seconds": round(data["seconds"], 1),
             "tidy": bool(t.get("tidy", False)), "subtitles_before": t.get("subtitles_before"),
             "subtitles_after": t.get("subtitles_after"), "joined": t.get("joined", 0),
-            "split": t.get("split", 0), "capitals_fixed": t.get("capitals_fixed", 0)}
+            "split": t.get("split", 0), "capitals_fixed": t.get("capitals_fixed", 0),
+            "timings": timings(data)}
+
+
+def timings(data) -> dict:
+    """Seconds per step of a synced item (null when the step did not run)."""
+    st = data.get("stats") or {}
+    r = lambda x: round(x, 1) if isinstance(x, (int, float)) else None
+    return {"from_cache": bool(st.get("cached")), "read_audio": r(st.get("decode_s")),
+            "listen": r(st.get("asr_s")), "match": r(data.get("align_s"))}
 
 
 def fmt_secs(s):
@@ -107,6 +116,19 @@ def main(argv):
         print("Error: not found: " + ", ".join(missing), file=sys.__stderr__)
         log("usage error: not found " + ", ".join(missing))
         return EXIT_USAGE
+
+    # the speech and line-matching models start loading now, while the folders are scanned
+    from subsync import settings as gui_settings
+    from subsync.pipeline import Engine
+
+    settings = {"suffix": suffix, "overwrite": args.overwrite, "tidy": not args.keep_layout,
+                "gpu_batch": gui_settings.load().get("gpu_batch", 0)}
+    events: "queue.Queue" = queue.Queue()
+    engine = Engine(lambda jid, kind, data: events.put((jid, kind, data)), lambda: settings)
+    engine.force_cpu = args.cpu
+    t_start = time.time()
+    engine.warm_up()
+
     videos, subs = expand([os.path.abspath(p) for p in args.paths])
     videos = [v for v in videos if v not in used]
     subs = [s for s in subs if s not in used]
@@ -126,23 +148,15 @@ def main(argv):
         out(f"   skip {os.path.basename(k['video'] or k['subtitle'])}  ({k['reason']})")
     if not rows:
         out("Nothing to do: no video + subtitle pairs found.")
+        engine.shutdown()
         write_report(args.report, [], skipped, EXIT_NOTHING, 0)
         return EXIT_NOTHING
 
     # ---------------------------------------------------------------- run
-    from subsync import settings as gui_settings
-    from subsync.pipeline import Engine
-
-    settings = {"suffix": suffix, "overwrite": args.overwrite, "tidy": not args.keep_layout,
-                "gpu_batch": gui_settings.load().get("gpu_batch", 0)}
-    events: "queue.Queue" = queue.Queue()
-    engine = Engine(lambda jid, kind, data: events.put((jid, kind, data)), lambda: settings)
-    engine.force_cpu = args.cpu
     jobs = {}
     for n, (v, s) in enumerate(rows, 1):
         jobs[n] = {"video": v, "subtitle": s, "status": "pending", "n": n}
-    t_start = time.time()
-    engine.warm_up()
+    speech = {}
     for n, j in jobs.items():
         engine.submit(n, j["video"], j["subtitle"])
 
@@ -183,6 +197,10 @@ def main(argv):
                 if kind == "device":
                     st = data.get("state")
                     if st == "ready":
+                        speech.update(device="gpu" if data["device"] == "cuda" else "cpu", name=data.get("name") or None,
+                                      model_load_seconds=data.get("load_s"))
+                        log(f"speech model ready after {time.time() - t_start:.1f} s"
+                            + (f" (worker {data['load_s']:.1f} s)" if data.get("load_s") is not None else ""))
                         clear_line()
                         out("Speech recognition: " + (f"GPU ({data['name']})" if data["device"] == "cuda"
                                                       else "CPU (no usable NVIDIA GPU – slower)"))
@@ -216,6 +234,10 @@ def main(argv):
                     lo, hi = data["offsets"]
                     ends = sum(data["ends"][:2])
                     j.update(done_fields(data))
+                    tm = j["timings"]
+                    log(f"[{finished}/{total}] {name}: " + ("transcript from cache" if tm["from_cache"] else
+                        f"read audio {tm['read_audio']} s, listen {tm['listen']} s")
+                        + f", match {tm['match']} s, total {j['seconds']} s")
                     recut = tidy_summary(data.get("tidy") or {}).replace("→", "->")
                     out(f"OK   {tag} {name} -> {os.path.basename(data['out'])}  ({data['matched']}/{data['total']} lines matched, "
                         f"shift {lo:+.1f}..{hi:+.1f} s, {len(data['runs'])} section(s), {ends} ending(s) extended"
@@ -234,7 +256,7 @@ def main(argv):
         for j in jobs.values():
             if j["status"] == "pending":
                 j["status"] = "cancelled"
-        write_report(args.report, list(jobs.values()), skipped, EXIT_STOPPED, time.time() - t_start)
+        write_report(args.report, list(jobs.values()), skipped, EXIT_STOPPED, time.time() - t_start, speech)
         return EXIT_STOPPED
     engine.shutdown()
 
@@ -248,20 +270,21 @@ def main(argv):
         + (f", {len(skipped)} without a partner" if skipped else "") + ".")
     if code != EXIT_OK:
         out("Details: " + os.path.join(os.environ.get("SUBSYNC_ROOT", "."), "logs", "cli.log"))
-    write_report(args.report, list(jobs.values()), skipped, code, time.time() - t_start)
+    write_report(args.report, list(jobs.values()), skipped, code, time.time() - t_start, speech)
     return code
 
 
-def write_report(path, items, skipped, code, seconds):
+def write_report(path, items, skipped, code, seconds, speech=None):
     if not path:
         return
     rep = {
-        "subsync_version": "1.2.0",
+        "subsync_version": "1.3.0",
         "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "exit_code": code,
         "seconds": round(seconds, 1),
         "summary": {s: sum(1 for i in items if i["status"] == s)
                     for s in ("synced", "no_match", "failed", "cancelled")} | {"skipped": len(skipped)},
+        "speech_recognition": speech or None,
         "items": [{k: v for k, v in i.items() if k != "n"} for i in items] + skipped,
     }
     try:

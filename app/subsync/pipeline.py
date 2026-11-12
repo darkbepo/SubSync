@@ -155,6 +155,7 @@ class Engine:
         self.force_cpu = False
         self.device_info = None
         self._embedder = None
+        self._embed_lock = threading.Lock()
         self._lock = threading.Lock()
         self._gen = 0
         self.submit_q: "queue.Queue" = queue.Queue()
@@ -167,6 +168,23 @@ class Engine:
         with self._lock:
             if self.proc is None or not self.proc.is_alive():
                 self._spawn()
+        if self._embedder is None:
+            # the line-matching model loads while the speech model does, not after the first episode is heard
+            threading.Thread(target=self._warm_embedder, daemon=True).start()
+
+    def _warm_embedder(self):
+        try:
+            self._get_embedder()
+        except Exception:
+            traceback.print_exc()  # the align thread tries again and reports the error on its job
+
+    def _get_embedder(self):
+        with self._embed_lock:
+            if self._embedder is None:
+                from .embed import Embedder
+
+                self._embedder = Embedder(paths.MINILM_DIR)
+            return self._embedder
 
     def _spawn(self):
         self._gen += 1
@@ -219,10 +237,10 @@ class Engine:
     def _handle(self, msg):
         kind = msg[0]
         if kind == "device":
-            _, device, name, batch, dll_errors = msg
+            _, device, name, batch, dll_errors, *rest = msg
             self.device_info = (device, name, batch)
             self.emit(None, "device", {"state": "ready", "device": device, "name": name, "batch": batch,
-                                       "dll_errors": dll_errors})
+                                       "dll_errors": dll_errors, "load_s": rest[0] if rest else None})
         elif kind == "fatal":
             if not self.force_cpu:
                 self.force_cpu = True
@@ -348,16 +366,13 @@ class Engine:
             jid = job["id"]
             try:
                 self.emit(jid, "stage", "Matching lines…")
-                if self._embedder is None:
-                    from .embed import Embedder
-
-                    self._embedder = Embedder(paths.MINILM_DIR)
+                embedder = self._get_embedder()
                 from . import details, subtitles
 
                 lines = subtitles.load(job["sub"])
                 t0 = time.time()
                 s = self.get_settings()
-                p = process(lines, words, lang, self._embedder, bool(s.get("tidy", True)),
+                p = process(lines, words, lang, embedder, bool(s.get("tidy", True)),
                             progress=lambda f: self.emit(jid, "progress", f))
                 res = p.res
                 if not res.ok:

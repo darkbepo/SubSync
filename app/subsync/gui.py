@@ -790,6 +790,8 @@ class MainWindow(QMainWindow):
             if st == "loading":
                 self.set_chip("Loading speech model…", "warn")
             elif st == "ready":
+                print(f"{time.strftime('%H:%M:%S')} speech model ready on {data['device']}"
+                      + (f" after {data['load_s']:.1f} s" if data.get("load_s") is not None else ""), flush=True)
                 if data["device"] == "cuda":
                     name = (data["name"] or "NVIDIA GPU").replace("NVIDIA ", "").replace("GeForce ", "")
                     self.set_chip(f"{name} · ready", "success")

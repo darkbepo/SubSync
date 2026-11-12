@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 (not released yet)
+
+Faster starts; the results and the matching are unchanged.
+
+- **The first episode's audio is read while the speech model loads.** Before, reading only started once the model was ready. This saves up to the model's loading time on every run (window and command line), and matters most when another program runs `subsync-cli` once per episode.
+- **The line-matching model loads at start**, alongside the speech model, instead of after the first episode has been listened to.
+- **The command line starts loading both models before it scans the folders.**
+- **Setup prepares Python's ready-to-run files** (`.pyc`) for the libraries, so the first start after installing doesn't have to.
+- **Timings in the logs.** `logs\app.log` shows each start-up step with the seconds since start; `logs\setup.log` gets one line per start ("self-check … ms, window open after … s"); `logs\worker.log` and `logs\cli.log` say how long the speech model took to load; `cli.log` gets each item's read-audio / listen / match seconds.
+- **JSON report:** new `speech_recognition` (GPU or CPU, card name, model load seconds) and, per synced item, `timings`.
+
 ## 1.2.0
 
 - **Word-accurate timing** (English audio). Every subtitle now starts when its first word is spoken and ends after its last. Before, subtitles were placed by whole spoken phrases, so lines that start mid-sentence (common in TV captions) or open with a short sentence ("Hmm. Let me see…") kept their late start. On a real broadcast-caption episode, subtitles starting within 0.3 s of their first word went from 85% to 99.5%, and lines disappearing before their words were spoken went from 9 to 0.

@@ -126,6 +126,7 @@ func loadManifest() *manifest {
 
 func main() {
 	runtime.LockOSThread()
+	started := time.Now()
 	if err := initRoot(); err != nil {
 		if mode == "cli" {
 			fmt.Fprintln(os.Stderr, "SubSync cannot write to its folder: "+root)
@@ -151,7 +152,9 @@ func main() {
 	loadSources()
 	m := loadManifest()
 	gpu := hasNvidiaDriver()
-	if needsInstall(m, gpu) {
+	needs := needsInstall(m, gpu)
+	checked := time.Since(started)
+	if needs {
 		if !alone {
 			fatal("Some SubSync files need to be repaired, but the command-line version is using this folder right now.\n\nWait for it to finish, then start SubSync again.")
 		}
@@ -169,7 +172,7 @@ func main() {
 	if err := syncAppFiles(); err != nil {
 		fatal("Could not unpack program files: " + err.Error())
 	}
-	launch()
+	launch(started, checked, needs)
 }
 
 // appEnv is the environment the Python side runs with: everything inside the tool folder.
@@ -542,7 +545,8 @@ func installOnce(ctx context.Context, m *manifest, gpu bool, st *progressState) 
 			markDone("model:" + md.Dest)
 		}
 	}
-	st.set("Finishing…", "", 1)
+	st.set("Finishing…", "Preparing the Python libraries for a quick start", 1)
+	precompile(ctx)
 	if err := os.RemoveAll(dl); err != nil {
 		_ = err
 	}
@@ -1165,7 +1169,44 @@ func syncAppFiles() error {
 	return nil
 }
 
-func launch() {
+// precompile creates Python's ready-to-run (.pyc) copies of the installed libraries, so
+// the first start doesn't have to. Python would create them itself on first use, so any
+// failure here only costs speed and is ignored. Files that are already up to date are skipped.
+func precompile(ctx context.Context) {
+	py := filepath.Join(pyDir(), "pythonw.exe")
+	if !fileExists(py) {
+		py = filepath.Join(pyDir(), "python.exe")
+	}
+	if !fileExists(py) || !dirHasFiles(sitePkg()) {
+		return
+	}
+	t0 := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	// -j 0: one process per CPU core; -q: only errors; -x: skip test folders (not needed to run)
+	cmd := exec.CommandContext(ctx, py, "-X", "utf8", "-m", "compileall", "-q", "-j", "0",
+		"-x", `[\\/](tests?|testing)[\\/]`, sitePkg())
+	cmd.Dir = root
+	cmd.Env = appEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	job := newKillOnCloseJob()
+	if err := cmd.Start(); err != nil {
+		logLine("precompile: could not start: " + err.Error())
+		return
+	}
+	assignToJob(job, cmd.Process.Pid) // its helper processes end with it
+	err := cmd.Wait()
+	killJob(job)
+	msg := fmt.Sprintf("precompile: %.1f s", time.Since(t0).Seconds())
+	if err != nil {
+		msg += " (" + err.Error() + "; some files will be compiled on first use instead)"
+	}
+	logLine(msg)
+}
+
+// launch starts the window and waits for it. started/checked/setupRan only feed the
+// start-up timing line in logs\setup.log.
+func launch(started time.Time, checked time.Duration, setupRan bool) {
 	logs := filepath.Join(root, "logs")
 	_ = os.MkdirAll(logs, 0o755)
 	cache := filepath.Join(root, "cache")
@@ -1239,6 +1280,10 @@ func launch() {
 			failed(fmt.Sprintf("SubSync closed before its window appeared (%s).", exitReason(code)))
 		case <-tick.C:
 			ready = fileExists(readyFile)
+			if ready && !setupRan {
+				logLine(fmt.Sprintf("start: self-check %d ms, window open after %.1f s",
+					checked.Milliseconds(), time.Since(started).Seconds()))
+			}
 		case <-slow:
 			if messageBox(0, "SubSync is taking unusually long to open.\n\nKeep waiting?\n(No closes it and shows what it was doing.)",
 				"SubSync", mbYesNo|mbIconWarning) != idYes {

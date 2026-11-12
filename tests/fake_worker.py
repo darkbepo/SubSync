@@ -9,7 +9,7 @@ def worker_main(req_q, res_q, cancel_ev, force_cpu, batch_hint):
     from subsync.media import decode
     from subsync.asr_worker import _clips
     from faster_whisper.vad import VadOptions, get_speech_timestamps
-    res_q.put(("device", "cuda", "FAKE GPU", 8, []))
+    res_q.put(("device", "cuda", "FAKE GPU", 8, [], 0.5))
     while True:
         job = req_q.get()
         if job is None: return
@@ -17,8 +17,8 @@ def worker_main(req_q, res_q, cancel_ev, force_cpu, batch_hint):
         t0 = time.time()
         a = decode(job["path"], job["audio_n"])
         clips = _clips(get_speech_timestamps(a, VadOptions(max_speech_duration_s=29.5, min_silence_duration_ms=160)))
-        res_q.put(("stage", job["id"], "Listening…"))
+        res_q.put(("stage", job["id"], "Listening…")); t1 = time.time()
         for k in range(4):
             time.sleep(0.3); res_q.put(("progress", job["id"], k / 4))
         words = [tuple(w) for w in json.load(open(job["path"] + ".asr.json"))]
-        res_q.put(("result", job["id"], words, "en", len(a) / 16000, {"decode_s": time.time() - t0, "clips": len(clips)}))
+        res_q.put(("result", job["id"], words, "en", len(a) / 16000, {"decode_s": t1 - t0, "asr_s": time.time() - t1, "clips": len(clips)}))
