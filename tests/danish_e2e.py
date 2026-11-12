@@ -7,7 +7,7 @@ Prints PASS/FAIL; exits non-zero on a failure."""
 import os as _os, sys as _sys
 _REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 import io, json, os, shutil, sys, threading, time
-os.environ["SUBSYNC_ROOT"] = "/tmp/ssroot_da"; os.makedirs("/tmp/ssroot_da", exist_ok=True)
+os.environ["SUBSYNC_ROOT"] = "/tmp/ssroot_da"; shutil.rmtree("/tmp/ssroot_da", ignore_errors=True); os.makedirs("/tmp/ssroot_da")
 sys.path.insert(0, _os.path.join(_REPO, "app")); sys.path.insert(0, _os.path.join(_REPO, "tests"))
 if __name__ == "__main__":
     import numpy as np, subsync.asr_worker, fake_worker, subsync.embed
@@ -50,6 +50,10 @@ if __name__ == "__main__":
        and en.get("subtitle_language") == "en" and en.get("timing_from") == "audio" and en.get("reference_subtitle") is None,
        "English result as before (.en.srt, from the audio)")
     ok(it.get("Show S01E02 WEB-DL.srt", {}).get("subtitle_language") == "en", "untagged English subtitle stays English")
+    ok([en.get("timings", {}).get("from_cache"), da.get("timings", {}).get("from_cache")].count(True) == 1,
+       "the episode is listened to once for both subtitles")
+    ok(os.path.exists("/tmp/ssroot_da/logs/details/Show.S01E01.1080p.da.tsv")
+       and os.path.exists("/tmp/ssroot_da/logs/details/Show.S01E01.1080p.tsv"), "separate details files per language")
 
     # 2. --pair + --sub-lang da, no reference: from the audio; overwrite off -> .da.#1.srt
     code = cli.main(["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.da.srt", "--sub-lang", "da", "--report", W + "/r2.json"])
@@ -63,6 +67,12 @@ if __name__ == "__main__":
     d3 = items(W + "/r3.json").get("Show.S01E01.da.srt", {})
     ok(code == 0 and d3.get("timing_from") == "reference" and d3.get("output") == W + "/Show.S01E01.1080p.dan.srt",
        f"--reference + --suffix eng: .dan.srt ({d3.get('output')})")
+
+    # 3b. --sub-lang en wins over a Danish name
+    code = cli.main([W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.da.srt", "--sub-lang", "en", "--overwrite", "--report", W + "/r3b.json"])
+    d3b = items(W + "/r3b.json").get("Show.S01E01.da.srt", {})
+    ok(code == 0 and d3b.get("subtitle_language") == "en" and d3b.get("output") == W + "/Show.S01E01.1080p.en.srt",
+       f"--sub-lang en wins over the name ({d3b.get('subtitle_language')}, {d3b.get('output')})")
 
     # 4. bad --reference use
     for args, what in ((["--pair", W + "/Show.S01E01.1080p.mkv", W + "/Show.S01E01.da.srt", "--reference", W + "/nope.srt"], "missing reference"),

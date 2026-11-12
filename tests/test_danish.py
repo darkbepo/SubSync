@@ -25,9 +25,18 @@ class Language(unittest.TestCase):
     def test_names(self):
         for name, want in (("Show.S01E01.da.srt", "da"), ("Show.S01E01.dan.srt", "da"), ("Show.S01E01.Danish.srt", "da"),
                            ("Show.S01E01.dansk.srt", "da"), ("Show.S01E01 [da].srt", "da"), ("Show.S01E01.da.hi.srt", "da"),
+                           ("Show.S01E01_dan.srt", "da"), ("Show.S01E01 (Danish).srt", "da"), ("Show.S01E01.da.#1.srt", "da"),
                            ("Show.S01E01.en.srt", "en"), ("Show.S01E01.eng.srt", "en"), ("Show.English.Title.da.srt", "da"),
-                           ("Show.S01E01.srt", None), ("Dante.S01E01.srt", None), ("Dana.srt", None), ("Endgame.srt", None)):
+                           ("Show.S01E01.srt", None), ("Dante.S01E01.srt", None), ("Dana.srt", None), ("Endgame.srt", None),
+                           # title words, not tags (review of 1.5.0)
+                           ("The.Da.Vinci.Code.2006.srt", None), ("The.Danish.Girl.2015.srt", None),
+                           ("The Danish Girl (2015).srt", None), ("Leonardo.da.Vinci.srt", None), ("Steely.Dan.Live.srt", None),
+                           ("Show - S02E05 - Dan.srt", None), ("Show.Dansk.Cafe.S01E01.srt", None)):
             self.assertEqual(language.from_name(name), want, name)
+
+    def test_title_ending_in_dan_with_english_text_is_english(self):
+        self.assertEqual(language.resolve("Meet.Dan.srt", lines(EN)), "en")
+        self.assertEqual(language.resolve("Meet.Dan.srt", lines(DA)), "da")
 
     def test_text(self):
         self.assertEqual(language.resolve("x.srt", lines(DA)), "da")
@@ -46,19 +55,23 @@ class Pairing(unittest.TestCase):
         v = ["/x/Show.S01E01.mkv", "/x/Show.S01E02.mkv", "/x/Show.S01E03.mkv"]
         s = ["/x/Show.S01E01.en.srt", "/x/Show.S01E01.da.srt", "/x/Show.S01E02.dan.srt", "/x/Show S01E02 WEB.srt"]
         rows, unmatched = pair_languages(v, s)
-        self.assertEqual(rows, [("/x/Show.S01E01.mkv", "/x/Show.S01E01.en.srt", None, None),
-                                ("/x/Show.S01E01.mkv", "/x/Show.S01E01.da.srt", "da", "/x/Show.S01E01.en.srt"),
-                                ("/x/Show.S01E02.mkv", "/x/Show S01E02 WEB.srt", None, None),
-                                ("/x/Show.S01E02.mkv", "/x/Show.S01E02.dan.srt", "da", "/x/Show S01E02 WEB.srt")])
+        self.assertEqual(rows, [("/x/Show.S01E01.mkv", "/x/Show.S01E01.en.srt", None),
+                                ("/x/Show.S01E01.mkv", "/x/Show.S01E01.da.srt", "/x/Show.S01E01.en.srt"),
+                                ("/x/Show.S01E02.mkv", "/x/Show S01E02 WEB.srt", None),
+                                ("/x/Show.S01E02.mkv", "/x/Show.S01E02.dan.srt", "/x/Show S01E02 WEB.srt")])
         self.assertEqual(unmatched, [("/x/Show.S01E03.mkv", None)])
 
     def test_english_only_unchanged(self):
         from subsync.pairing import pair
-        v = ["/x/A.S01E01.mkv", "/x/A.S01E02.mkv"]
-        s = ["/x/A.S01E02.en.srt", "/x/A.S01E01.eng.srt"]
-        rows, unmatched = pair_languages(v, s)
-        self.assertEqual([(a, b) for a, b, _, _ in rows], [x for x in pair(v, s) if x[0] and x[1]])
-        self.assertEqual(unmatched, [])
+        for v, s in ((["/x/A.S01E01.mkv", "/x/A.S01E02.mkv"], ["/x/A.S01E02.en.srt", "/x/A.S01E01.eng.srt"]),
+                     (["/x/Meet.Dan.mkv", "/x/Other.Film.mkv"], ["/x/Meet.Dan.srt", "/x/Other.Film.srt"]),
+                     (["/x/The.Danish.Girl.2015.mkv"], ["/x/The.Danish.Girl.2015.en.srt"]),
+                     (["/x/Leonardo.da.Vinci.mkv", "/x/Steely.Dan.Live.mkv"], ["/x/Steely.Dan.Live.srt", "/x/Leonardo.da.Vinci.srt"])):
+            rows, unmatched = pair_languages(v, s)
+            want = [x for x in pair(v, s) if x[0] and x[1]]
+            self.assertEqual(sorted((a, b) for a, b, _ in rows), sorted(want), (v, s))
+            self.assertEqual(len(rows), len(v), (v, s))
+            self.assertEqual(unmatched, [])
 
 
 def danish(bad, truth, foreign):

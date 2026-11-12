@@ -8,7 +8,7 @@ from .media import VIDEO_EXTS
 from .subtitles import SUB_EXTS
 
 _EP = re.compile(r"(?i)\bs(\d{1,2})[ ._-]?e(\d{1,3})\b|\b(\d{1,2})x(\d{2,3})\b")
-_TAIL = re.compile(r"(?i)([._ -](en|eng|english|da|dan|danish|dansk|sdh|hi|cc|forced|full|default|#\d+|\d{1,2}))+$")
+_TAIL = re.compile(r"(?i)([._ -](en|eng|english|sdh|hi|cc|forced|full|default|#\d+|\d{1,2})|[._](da|dan|danish|dansk))+$")
 
 
 def expand(paths: list[str]) -> tuple[list[str], list[str]]:
@@ -68,6 +68,12 @@ def pair(videos: list[str], subs: list[str]) -> list[tuple[str | None, str | Non
         rows[v] = s
         pending.remove(s)
 
+    # 0. exactly the same name (Meet.Dan.mkv <-> Meet.Dan.srt), before any tag is taken off
+    for s in list(pending):
+        for v in vids:
+            if v not in rows and _stem(v).lower() == _stem(s).lower():
+                take(v, s)
+                break
     # 1. same name (Movie.mkv <-> Movie.en.srt)
     for s in list(pending):
         k = sub_key(s)
@@ -106,26 +112,28 @@ def pair(videos: list[str], subs: list[str]) -> list[tuple[str | None, str | Non
 
 def pair_languages(videos: list[str], subs: list[str]):
     """Like pair(), but a video can have one subtitle per language (1.5.0: English and Danish).
-    Subtitles whose name says Danish are paired separately from the rest. Returns
-    (rows, unmatched): rows are (video, subtitle, language or None, reference or None), where a
-    Danish row's reference is the English subtitle paired with the same video; unmatched are
+    Subtitles whose name ends in a Danish tag are paired separately from the rest. Returns
+    (rows, unmatched): rows are (video, subtitle, reference or None), in the videos' order with
+    each video's other subtitles before its Danish one; a Danish-named row's reference is the
+    subtitle paired with the same video in the other pass (the engine uses it only if it is
+    English, and decides each subtitle's language from its name and text). unmatched are
     (video, None) / (None, subtitle) as in pair()."""
     from . import language
 
     da = [s for s in subs if language.from_name(s) == "da"]
     other = [s for s in subs if s not in da]
     first = pair(videos, other)
-    english = {v: s for v, s in first if v and s}
-    rows = [(v, s, None, None) for v, s in first if v and s]
-    unmatched = [(None, s) for v, s in first if not v]
+    other_of = {v: s for v, s in first if v and s}
+    rows = [(v, s, None) for v, s in first if v and s]
+    unmatched_subs = [s for v, s in first if not v]
     if da:
         for v, s in pair(videos, da):
             if v and s:
-                rows.append((v, s, "da", english.get(v)))
+                rows.append((v, s, other_of.get(v)))
             elif s:
-                unmatched.append((None, s))
+                unmatched_subs.append(s)
     have = {r[0] for r in rows}
-    unmatched = [(v, None) for v in dict.fromkeys(videos) if v not in have] + unmatched
     order = {v: k for k, v in enumerate(dict.fromkeys(videos))}
     rows.sort(key=lambda r: (order.get(r[0], 0), r[2] is not None))
+    unmatched = [(v, None) for v in dict.fromkeys(videos) if v not in have] + [(None, s) for s in unmatched_subs]
     return rows, unmatched

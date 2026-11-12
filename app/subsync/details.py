@@ -9,10 +9,11 @@ from . import paths
 KEEP = 200
 
 
-def write(video_path: str, rows: list[dict]) -> str:
+def write(video_path: str, rows: list[dict], lang: str = "en") -> str:
+    """lang: the subtitle's language; a non-English one gets its own file (<video>.da.tsv)."""
     folder = os.path.join(paths.LOGS, "details")
     os.makedirs(folder, exist_ok=True)
-    out = os.path.join(folder, os.path.splitext(os.path.basename(video_path))[0] + ".tsv")
+    out = os.path.join(folder, os.path.splitext(os.path.basename(video_path))[0] + ("" if lang == "en" else f".{lang}") + ".tsv")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("new\tfrom original\torig start\tnew start\tnew end\twords\tmatched\tchanges\n")
         for r in rows:

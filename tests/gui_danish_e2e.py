@@ -58,6 +58,12 @@ if __name__ == "__main__":
     ok(os.path.exists(W + "/Show.S01E01.1080p.en.srt"), "English written as before")
     if len(sys.argv) > 1:
         w.grab().save(sys.argv[1] + "-after.png")
+    # a Danish subtitle dropped later joins its video's row group (review of 1.5.0)
+    shutil.copy(W + "/Show S01E02 WEB-DL.srt", W + "/Show.S01E02.dan.srt")
+    w.add_paths([W + "/Show.S01E02.dan.srt"], None); pump(0.5)
+    rows = [(os.path.basename(j.video or "-"), os.path.basename(j.sub or "-")) for j in w.jobs]
+    k = rows.index(("Show.S01E02.1080p.mp4", "Show S01E02 WEB-DL.srt"))
+    ok(rows[k + 1] == ("Show.S01E02.1080p.mp4", "Show.S01E02.dan.srt"), f"later Danish subtitle joins its video ({rows})")
     en2 = next(j for j in w.jobs if j.sub and j.sub.endswith("WEB-DL.srt"))
     w.set_language(en2, "da")
     ok(en2.lang == "da" and en2.state == "waiting", "language can be changed")

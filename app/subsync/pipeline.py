@@ -15,6 +15,7 @@ import json
 import multiprocessing as mp
 import os
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -72,6 +73,13 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None,
     from . import reshape as R
     from . import words as W
     from .align import align, keep_visible
+
+    seen = [0.0]
+    report = progress
+
+    def progress(f):  # never backwards, also when the reference fails and the audio is used
+        seen[0] = max(seen[0], f)
+        report(seen[0])
 
     timing_from = "audio"
     res = None
@@ -193,6 +201,7 @@ class Engine:
         self._gen = 0
         self.submit_q: "queue.Queue" = queue.Queue()
         self._dropped: set[int] = set()
+        self._waiting: dict[str, list[dict]] = {}  # transcript cache file -> jobs waiting for it
         threading.Thread(target=self._align_loop, daemon=True).start()
         threading.Thread(target=self._submit_loop, daemon=True).start()
 
@@ -258,9 +267,15 @@ class Engine:
                                        "text": f"GPU worker stopped (code {code}) – switched to CPU (slower)"})
             self._respawn_and_resend()
         else:
-            for jid in list(self.inflight):
+            for jid in list(self.inflight) + self._drain_waiting():
                 self.emit(jid, "error", "Speech recognition stopped unexpectedly")
             self.inflight.clear()
+
+    def _drain_waiting(self) -> list[int]:
+        """Job numbers of every job waiting for another one's transcript; forgets them."""
+        out = [w["id"] for ws in self._waiting.values() for w in ws]
+        self._waiting.clear()
+        return out
 
     def _respawn_and_resend(self):
         """Start a fresh (CPU) worker and hand it every job the old one had. One locked step, so a
@@ -288,7 +303,7 @@ class Engine:
             else:
                 self.emit(None, "device", {"state": "error", "text": "Speech recognition could not start",
                                            "detail": msg[1]})
-                for jid in list(self.inflight):
+                for jid in list(self.inflight) + self._drain_waiting():
                     self.emit(jid, "error", "Speech recognition could not start (see logs folder)")
                 self.inflight.clear()
         elif kind == "batch":
@@ -301,6 +316,14 @@ class Engine:
             job = self.inflight.pop(msg[1], None)
             if job is not None:
                 self.emit(msg[1], "cancelled" if msg[2] == "cancelled" else "error", msg[2])
+                waiting = self._waiting.pop(job["cache"], [])
+                if msg[2] == "cancelled":
+                    for w in waiting:
+                        self.emit(w["id"], "cancelled", "cancelled")
+                elif waiting:  # let the next one try for itself (it may give a clearer error)
+                    with self._lock:
+                        self._send(waiting[0])
+                        self._waiting[waiting[0]["cache"]] = waiting[1:]
         elif kind == "result":
             _, jid, words, lang, dur, stats = msg
             job = self.inflight.pop(jid, None)
@@ -308,12 +331,18 @@ class Engine:
                 return
             try:
                 os.makedirs(os.path.dirname(job["cache"]), exist_ok=True)
-                with gzip.open(job["cache"], "wt", encoding="utf-8") as f:
+                tmp = job["cache"] + f".{os.getpid()}.tmp"
+                with gzip.open(tmp, "wt", encoding="utf-8") as f:
                     json.dump({"words": words, "lang": lang, "dur": dur}, f)
+                os.replace(tmp, job["cache"])  # never a half-written cache file for another job to read
             except OSError:
                 pass
             job["stats"] = stats
             self.align_q.put((job, words, lang))
+            # other subtitles of the same video (an English and a Danish one) use this transcript
+            for w in self._waiting.pop(job["cache"], []):
+                w["stats"] = {"cached": True}
+                self.align_q.put((w, [tuple(x) for x in words], lang))
 
     def _send(self, job):
         self.inflight[job["id"]] = job
@@ -352,6 +381,10 @@ class Engine:
                 except Exception:
                     pass
             with self._lock:
+                if any(j["cache"] == job["cache"] for j in self.inflight.values()):
+                    # this video is being listened to for another subtitle: wait for its transcript
+                    self._waiting.setdefault(job["cache"], []).append(job)
+                    return
                 if self.proc is None or not self.proc.is_alive():
                     self._spawn()
                 self._send(job)
@@ -360,7 +393,7 @@ class Engine:
 
     def stop(self):
         """Cancel everything: kill the worker (frees the GPU at once) and start a fresh one."""
-        jobs = list(self.inflight)
+        jobs = list(self.inflight) + self._drain_waiting()
         self.inflight.clear()
         while True:
             try:
@@ -415,10 +448,10 @@ class Engine:
                     try:
                         ref = subtitles.load(job["reference"])
                         if language.resolve(job["reference"], ref) != "en":  # only an English one can time it
-                            print(f"reference subtitle is not English: {job['reference']}")
+                            print(f"reference subtitle is not English, timing from the audio: {job['reference']}", file=sys.stderr)
                             ref = None
                     except Exception as e:  # time it from the audio instead
-                        print(f"reference subtitle not readable: {e}")
+                        print(f"reference subtitle not readable, timing from the audio: {e}", file=sys.stderr)
                 t0 = time.time()
                 s = self.get_settings()
                 p = process(lines, words, lang, embedder, bool(s.get("tidy", True)),
@@ -431,7 +464,7 @@ class Engine:
                                                     bool(s.get("overwrite", False)))
                 self._write(jid, out, subtitles.to_srt(p.lines))
                 try:
-                    details.write(job["video"], p.details)
+                    details.write(job["video"], p.details, sub_lang)
                 except OSError:
                     pass
                 self.emit(jid, "done", {

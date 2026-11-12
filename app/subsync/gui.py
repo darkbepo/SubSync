@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import paths, theme
-from .pairing import expand, pair_languages
+from .pairing import expand, pair
 from .theme import C
 
 APP_NAME = "SubSync"
@@ -600,6 +600,8 @@ class MainWindow(QMainWindow):
                 self.rebuild()
                 self.after_change()
                 return
+        from . import language
+
         have_v = {j.video for j in self.jobs if j.video}
         have_s = {j.sub for j in self.jobs if j.sub}
         half = [j for j in self.jobs if j.state == INCOMPLETE]
@@ -607,11 +609,25 @@ class MainWindow(QMainWindow):
         pool_s = [j.sub for j in half if j.sub] + [s for s in subs if s not in have_s]
         for j in half:
             self.jobs.remove(j)
-        rows, unmatched = pair_languages(pool_v, pool_s)
-        for v, s, lang, _ in rows:  # one row per subtitle; a video may have an English and a Danish one
-            self.jobs.append(Job(v, s, lang))
-        for v, s in unmatched:
+        da = [s for s in pool_s if language.from_name(s) == "da"]
+        for v, s in pair(pool_v, [s for s in pool_s if s not in da]):  # as before 1.5.0
             self.jobs.append(Job(v, s))
+        if da:  # a Danish subtitle may join a video that already has a row (one row per subtitle)
+            with_da = {j.video for j in self.jobs if j.video and j.sub and j.lang == "da"}
+            cands = list(dict.fromkeys(j.video for j in self.jobs if j.video and j.video not in with_da))
+            for v, s in pair(cands, da):
+                if not s:
+                    continue
+                if v is None:
+                    self.jobs.append(Job(None, s))
+                    continue
+                bare = next((j for j in self.jobs if j.video == v and not j.sub), None)
+                if bare is not None:  # the video was waiting for a subtitle: this is it
+                    bare.sub, bare.lang = s, sub_language(s)
+                    self._reset(bare)
+                else:
+                    at = max(k for k, j in enumerate(self.jobs) if j.video == v)
+                    self.jobs.insert(at + 1, Job(v, s))
         self.rebuild()
         self.after_change()
 

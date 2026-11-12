@@ -194,16 +194,19 @@ def main(argv):
     subs = [s for s in subs if s not in used]
     skipped = []
     found, unmatched = pair_languages(videos, subs)
-    rows += [(v, s, lang or want, ref) for v, s, lang, ref in found]
+    rows += [(v, s, want, ref) for v, s, ref in found]  # --sub-lang en/da wins; auto: from each name and text
     for v, s in unmatched:
         skipped.append({"video": v, "subtitle": s, "status": "skipped",
                         "reason": "no matching subtitle" if v else "no matching video"})
 
     out(f"SubSync {time.strftime('%Y-%m-%d %H:%M')}: {len(rows)} pair(s) to sync"
         + (f", {len(skipped)} file(s) without a partner" if skipped else ""))
+    from subsync import language
+
     for n, (v, s, lang, ref) in enumerate(rows, 1):
+        shown = lang or language.from_name(s)
         out(f"  {n:>3}. {os.path.basename(v)}  <-  {os.path.basename(s)}"
-            + (f"  [{lang}" + (f", timed by {os.path.basename(ref)}" if ref else "") + "]" if lang and lang != "en" else ""))
+            + (f"  [{shown}" + (f", timed by {os.path.basename(ref)}" if ref else "") + "]" if shown == "da" else ""))
     for k in skipped:
         out(f"   skip {os.path.basename(k['video'] or k['subtitle'])}  ({k['reason']})")
     if not rows:
