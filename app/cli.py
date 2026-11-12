@@ -434,7 +434,7 @@ def serve(argv):
 
     def read_stdin():
         try:
-            for line in requests:
+            for line in requests or ():  # no stdin at all: nothing to read
                 events.put(("line", line))
         except (OSError, ValueError) as e:  # a broken pipe counts as closed, or serve would wait forever
             log(f"serve: reading input failed: {e}")

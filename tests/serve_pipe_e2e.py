@@ -130,12 +130,15 @@ def run_case(name, ok):
             ok("reading_audio" in st and "listening" in st, f"[{name}] {i!r} stages {sorted(set(st))}")
             if sys.platform.startswith("linux"):  # the fix itself: no worker holds the caller's pipes
                 mine = {os.readlink(f"/proc/{p.pid}/fd/{fd}") for fd in (0, 1)}
+                checked = 0
                 for k in worker_pids(p.pid):
                     try:
                         got = {fd: os.readlink(f"/proc/{k}/fd/{fd}") for fd in (0, 1)}
                     except OSError:
                         continue
+                    checked += 1
                     ok(got == {0: "/dev/null", 1: "/dev/null"}, f"[{name}] worker {k} stdin/stdout are NUL (got {got})")
+                ok(checked > 0, f"[{name}] found a running worker to check")
                 ok(mine == {"/dev/null"}, f"[{name}] serve's own fd 0/1 point at NUL (got {mine})")
         if name != "open stdin":
             ok(any(e.get("event") == "warning" for e in events), f"[{name}] warning event about the GPU")
