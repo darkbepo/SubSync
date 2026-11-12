@@ -17,12 +17,12 @@ import (
 	"time"
 )
 
-const appVersionString = "1.3.1"
+const appVersionString = "1.4.0"
 
 // Exit codes (also documented in README-CLI.md and app/subsync/cli.py).
 const (
 	exitOK       = 0  // every pair was synced
-	exitPartial  = 3  // some pairs synced, some failed or did not match their video
+	exitPartial  = 3  // some pairs synced, some failed or did not match their video ("detect": video unreadable or no audio)
 	exitNone     = 4  // no pair could be synced
 	exitNothing  = 5  // no video + subtitle pairs found in the given paths
 	exitUsage    = 6  // invalid command line (unknown option, missing file, ...)
@@ -39,6 +39,8 @@ Usage:
   subsync-cli <files or folders...> [options]        (same as sync)
   subsync-cli serve [options]                        keep running for another program: pairs in on
                                                      stdin, results out on stdout (JSON lines, README-CLI.md)
+  subsync-cli detect <video> [options]               which language is spoken (quick, read-only; one JSON
+                                                     object on stdout, README-CLI.md)
   subsync-cli setup                                  download / repair SubSync's files
   subsync-cli check                                  report whether the installation is intact
   subsync-cli version
@@ -55,9 +57,16 @@ Sync options:
                           (needs --overwrite if it exists; --suffix is then not used)
   --progress              print machine-readable progress lines (PROGRESS {json}), see README-CLI.md
 
+Detect options:
+  --track N               check audio track N (1 = first); default: the track sync would use
+  --seconds S             listen to at most S seconds of speech (default 90)
+  --cpu                   don't use the NVIDIA GPU
+  --progress              PROGRESS lines before the JSON, as in sync
+
 Exit codes:
   0  every pair was synced
   3  some pairs synced, some failed or did not match their video
+     (detect: the video can't be read or has no audio)
   4  no pair could be synced
   5  no video + subtitle pairs found
   6  invalid command line
@@ -89,6 +98,8 @@ func cliMain(args []string) int {
 		return cliSync(args[1:])
 	case "serve":
 		return cliRun("serve", args[1:])
+	case "detect":
+		return cliRun("detect", args[1:])
 	}
 	if _, err := os.Stat(args[0]); err == nil || strings.HasPrefix(args[0], "--") {
 		return cliSync(args) // "subsync-cli D:\Shows\Season 1"
@@ -203,7 +214,13 @@ func cliSync(args []string) int { return cliRun("sync", args) }
 
 // cliRun prepares the installation, then runs app\cli.py <command> <args...>.
 func cliRun(command string, args []string) int {
-	if code := prepare(false); code != exitOK {
+	stdout := os.Stdout
+	if command == "detect" {
+		os.Stdout = os.Stderr // setup / repair messages must not mix with detect's JSON
+	}
+	code := prepare(false)
+	os.Stdout = stdout
+	if code != exitOK {
 		return code
 	}
 	py := filepath.Join(pyDir(), "python.exe")
@@ -228,7 +245,7 @@ func cliRun(command string, args []string) int {
 	}
 	assignToJob(job, cmd.Process.Pid)
 	_ = cmd.Wait()
-	code := 0
+	code = 0
 	if cmd.ProcessState != nil {
 		code = cmd.ProcessState.ExitCode()
 	}

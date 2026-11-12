@@ -91,6 +91,9 @@ echo -n exit3 > mode.txt; mkdir -p "$WORK/My Shows"
 out=$(cd "$WORK/My Shows" && wine "$D/subsync-cli.exe" sync . --suffix eng 2>&1); code=$?
 check "sync repairs first, then passes exit code 3 through"      '[ $code -eq 3 ] && [ -f models/minilm/tokenizer.json ]'
 check "arguments and working folder reach the app"               'echo "$out" | grep -q "sync . --suffix eng" && echo "$out" | grep -q "My Shows"'
+rm models/minilm/tokenizer.json
+out=$(cd "$WORK/My Shows" && wine "$D/subsync-cli.exe" detect x.mkv --track 2 2>/dev/null); code=$?
+check "detect repairs first; stdout gets only the app's output"     '[ $code -eq 3 ] && [ -f models/minilm/tokenizer.json ] && [ "$(echo "$out" | grep -c .)" -eq 1 ] && echo "$out" | grep -q "detect x.mkv --track 2"'
 echo -n crash > mode.txt
 wine subsync-cli.exe . >/dev/null 2>&1;                     check "app crash -> exit 10"            '[ $? -eq 10 ]'
 wine subsync-cli.exe frobnicate >/dev/null 2>&1;            check "unknown command -> exit 6"       '[ $? -eq 6 ]'

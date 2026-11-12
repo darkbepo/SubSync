@@ -85,7 +85,7 @@ app/        Python 3.12 (run by the embedded runtime\python)
 tests/      sim.py (accuracy simulation), gui_e2e.py / cli_e2e.py / serve_e2e.py / serve_pipe_e2e.py (end-to-end with a fake ASR worker), make_fixtures.py (espeak-ng + ffmpeg)
             test_words.py / test_reshape.py / test_ui.py (unittest; run with an installed SubSync's runtime\python\python.exe)
 tools/      replay.py (re-run process() on a cached transcript with this repo's code), measure.py (cue starts/ends vs Whisper words)
-  launcher/   run.sh: 29 Wine checks of the real exes against a fake internet (fallbacks, repair, processes, CLI); see its README
+  launcher/   run.sh: 30 Wine checks of the real exes against a fake internet (fallbacks, repair, processes, CLI); see its README
 build/      build.sh (cross-compiles both exes), make_icon.py
 tools/      update_deps.sh + requirements-windows.txt / requirements-cuda.txt → make_manifest.py → launcher/manifest.json
 docs/parked/  drafts waiting for the owner's approval
@@ -132,7 +132,7 @@ logs\app.log (window: startup steps, crashes, Qt messages), worker.log (speech/G
 - **Build** (any OS, Go ≥ 1.24, no CGO): `./build/build.sh` produces `build/SubSync.exe` and `build/subsync-cli.exe`. The icon and manifest are pre-compiled in `launcher/rsrc_windows_amd64.syso`; rebuild that with `x86_64-w64-mingw32-windres --preprocessor=cat app.rc -O coff -o rsrc_windows_amd64.syso`.
 - **Tests** (run from `tests/`): `python test_words.py`, `python test_reshape.py`, `python test_ui.py` (unit), `python sim.py`, `python make_fixtures.py && python gui_e2e.py`, `python cli_e2e.py "whole folder"` (one case per run; see its `cases`), `python serve_e2e.py` and `python serve_pipe_e2e.py` (print PASS/FAIL; the second runs `serve` as a separate process with piped, open stdin, so run it on Windows too). Use `QT_QPA_PLATFORM=offscreen` for headless runs.
   - Reference results: about 96–99% of lines within 0.3 s on simulated 45-minute episodes, about 80% fewer cut-off endings, zero new overlaps; on the synthesized-speech fixtures, every line is within 0.05 s.
-- **Launcher tests:** `tests/launcher/run.sh` (about 5 min, 29 checks, needs wine + Xvfb + Go). Run it after any change in `launcher/`.
+- **Launcher tests:** `tests/launcher/run.sh` (about 5 min, 30 checks, needs wine + Xvfb + Go). Run it after any change in `launcher/`.
 - **What can't be tested in a cloud/Linux session:** real Whisper or MiniLM inference (Hugging Face and python.org may be unreachable from the sandbox), NVIDIA GPU behaviour, and real Windows window behaviour (Wine ignores the "start hidden" flag from lesson 1). Be explicit with the owner about what was and wasn't tested.
 - **Dependencies:** edit the pinned versions in `tools/requirements-windows.txt` / `tools/requirements-cuda.txt`, then run `tools/update_deps.sh`, which regenerates `launcher/manifest.json` (URLs, SHA-256, sizes, GPU DLL sizes). With unchanged pins it reproduces the shipped manifest exactly. Afterwards re-check lesson 3 (cuDNN must match ctranslate2's bundled shim) and lesson 5 (self-check against the real wheels), and run the launcher tests.
 - **Version number:** it lives in `launcher/cli.go` (`appVersionString`), `app/cli.py` (the report's `subsync_version`) and `launcher/app.rc` (VERSIONINFO; after changing it rebuild `launcher/rsrc_windows_amd64.syso` with windres, see Build).

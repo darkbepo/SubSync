@@ -62,6 +62,37 @@ def pick_audio_stream(path: str):
         return n, lang, dur
 
 
+def _resampler(st):
+    """(resampler, channel names, centre) for one audio stream: 16 kHz, and for 5.1/7.1 all
+    channels so _mix() can weight the centre channel up, otherwise mono."""
+    import av
+
+    names = []
+    try:
+        names = [ch.name for ch in st.layout.channels]
+    except Exception:
+        pass
+    centre = "FC" in names and len(names) >= 6
+    try:
+        res = av.AudioResampler(format="fltp", layout=st.layout if centre else "mono", rate=16000)
+    except Exception:
+        centre = False
+        res = av.AudioResampler(format="fltp", layout="mono", rate=16000)
+    return res, names, centre
+
+
+def _mix(chunks, names, centre) -> np.ndarray:
+    a = np.concatenate(chunks, axis=1)
+    if centre:
+        fc, fl, fr = names.index("FC"), names.index("FL"), names.index("FR")
+        a = a[fc] + 0.35 * (a[fl] + a[fr])
+        peak = float(np.max(np.abs(a))) or 1.0
+        a = a / max(peak, 1e-4) * 0.9 if peak > 1.0 else a
+    else:
+        a = a[0]
+    return np.ascontiguousarray(a, dtype=np.float32)
+
+
 def decode(path: str, audio_n: int, cancelled=lambda: False) -> np.ndarray:
     """Decode one audio track to float32 16 kHz mono.  For 5.1/7.1 tracks the
     centre channel (where dialogue lives) is weighted up, which gives Whisper a
@@ -71,17 +102,7 @@ def decode(path: str, audio_n: int, cancelled=lambda: False) -> np.ndarray:
     with av.open(path) as c:
         st = c.streams.audio[audio_n]
         st.thread_type = "AUTO"
-        names = []
-        try:
-            names = [ch.name for ch in st.layout.channels]
-        except Exception:
-            pass
-        centre = "FC" in names and len(names) >= 6
-        try:
-            res = av.AudioResampler(format="fltp", layout=st.layout if centre else "mono", rate=16000)
-        except Exception:
-            centre = False
-            res = av.AudioResampler(format="fltp", layout="mono", rate=16000)
+        res, names, centre = _resampler(st)
         chunks = []
         n = 0
         for frame in c.decode(st):
@@ -95,12 +116,40 @@ def decode(path: str, audio_n: int, cancelled=lambda: False) -> np.ndarray:
             chunks.append(f.to_ndarray())
     if not chunks:
         raise RuntimeError("Could not decode any audio")
-    a = np.concatenate(chunks, axis=1)
-    if centre:
-        fc, fl, fr = names.index("FC"), names.index("FL"), names.index("FR")
-        a = a[fc] + 0.35 * (a[fl] + a[fr])
-        peak = float(np.max(np.abs(a))) or 1.0
-        a = a / max(peak, 1e-4) * 0.9 if peak > 1.0 else a
-    else:
-        a = a[0]
-    return np.ascontiguousarray(a, dtype=np.float32)
+    return _mix(chunks, names, centre)
+
+
+def decode_window(path: str, audio_n: int, start: float, length: float) -> np.ndarray:
+    """Decode length seconds of one audio track from start (seconds), like decode().
+    Jumps there when the file allows it, otherwise reads up to it. May return less audio
+    near the end of the file, or an empty array."""
+    import av
+
+    with av.open(path) as c:
+        st = c.streams.audio[audio_n]
+        st.thread_type = "AUTO"
+        res, names, centre = _resampler(st)
+        if start > 0:
+            try:
+                c.seek(int(start * 1_000_000), any_frame=False, backward=True)  # container time base (µs)
+            except Exception:
+                pass  # can't jump: decode from the start and skip what comes before
+        chunks = []
+        have = 0
+        need = int(length * 16000)
+        for frame in c.decode(st):
+            t = frame.time
+            if t is not None and t + frame.samples / (frame.sample_rate or 16000) <= start:
+                continue
+            frame.pts = None
+            for f in res.resample(frame):
+                a = f.to_ndarray()
+                if t is not None and t < start and not chunks:  # first frame starts before the window
+                    a = a[:, min(a.shape[1], int((start - t) * 16000)):]
+                chunks.append(a)
+                have += a.shape[1]
+            if have >= need:
+                break
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return _mix(chunks, names, centre)[:need]

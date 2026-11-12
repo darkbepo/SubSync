@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+- **New: `subsync-cli detect <video>`** finds out which language is spoken, from a short sample, for files whose audio is tagged "und" or not tagged at all. It reads 30-second pieces spread over the video, keeps only the parts with voice (up to 90 s of speech), and runs Whisper's language detection on them, without transcribing anything. One JSON object on stdout (`language`, `probability`, which track was checked and its tag, …). It is read-only (nothing is written next to the video or into the cache), checks the same audio track `sync` would use unless `--track` says otherwise, and can run while `serve` is running; if the GPU is full it switches to the CPU. For the Jellyfin plugin's Check button.
+- Internal: the audio decoding is split into small parts shared by `sync` and `detect`; `sync`'s decoded audio is byte-for-byte unchanged.
+
 ## 1.3.1
 
 - **`serve` no longer hangs when the calling program keeps its input open (Windows).** In 1.3.0 an item stayed at "queued" until the program closed `serve`'s stdin: the speech worker got the request pipe as its own input and could not finish starting while `serve` was waiting for the next request on it. `serve` now reads requests from a private copy of the pipe, and every worker it starts (at the beginning and after a GPU-to-CPU fallback) gets an empty input and output instead.

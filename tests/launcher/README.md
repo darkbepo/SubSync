@@ -9,7 +9,7 @@ WORK=/tmp/other-dir tests/launcher/run.sh
 
 Needs Linux with `wine` (64-bit), `Xvfb`, Go ≥ 1.24 and `python3`. It creates its own Wine prefix in the work folder, and installs a dummy `nvcuda.dll` there so the GPU path is exercised.
 
-## What it covers (29 checks)
+## What it covers (30 checks)
 
 | | Scenario |
 |---|---|
@@ -18,7 +18,7 @@ Needs Linux with `wine` (64-bit), `Xvfb`, Go ≥ 1.24 and `python3`. It creates 
 | C | A deleted library file, a truncated GPU DLL, a deleted model file and a deleted app file are each repaired. Nothing intact is downloaded again. |
 | D | The pinned model repository disappears, so the model is re-installed from the backup repository and the lock is updated. |
 | E | Processes: app + helper running; a second start only focuses the open window; killing the launcher ends everything; a crash before the window leaves nothing running; stray processes from older versions are cleaned up. |
-| F | CLI: `help`, `check` (intact → 0, damaged → 8), `sync` repairs first and passes exit codes through with the arguments and working folder intact, an app crash gives 10, an unknown command gives 6, nothing is left running. |
+| F | CLI: `help`, `check` (intact → 0, damaged → 8), `sync` repairs first and passes exit codes through with the arguments and working folder intact, `detect` repairs first and keeps the repair messages off stdout, an app crash gives 10, an unknown command gives 6, nothing is left running. |
 
 ## Files
 

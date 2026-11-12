@@ -28,6 +28,7 @@ D:\Tools\SubSync\subsync-cli.exe .
 | `subsync-cli sync <files or folders…> [options]` | Pair videos with subtitles and sync them. |
 | `subsync-cli <files or folders…> [options]` | Shorthand for `sync`. |
 | `subsync-cli serve [options]` | (Since 1.3.0.) Stay running for another program: pairs come in on stdin, results go out on stdout, one JSON object per line. See [`serve`](#serve-for-programs). |
+| `subsync-cli detect <video> [options]` | (Since 1.4.0.) Find out which language is spoken in a video, from a short sample. Quick and read-only; one JSON object on stdout. See [`detect`](#detect-which-language-is-spoken). |
 | `subsync-cli setup` | Download everything (first time) or repair missing/damaged files. |
 | `subsync-cli check` | Report whether the installation is complete and intact. Downloads nothing. |
 | `subsync-cli version` | Print the version. |
@@ -80,7 +81,7 @@ In an interactive terminal a single status line shows the current file, stage, p
 | Code | Meaning | What to do |
 |---|---|---|
 | `0` | Every pair was synced. | Nothing. |
-| `3` | Some pairs synced; others failed or didn't match their video. | See the `SKIP`/`FAIL` lines, the report, or `logs\cli.log`. |
+| `3` | Some pairs synced; others failed or didn't match their video. (`detect`: the video can't be read or has no audio track.) | See the `SKIP`/`FAIL` lines, the report, or `logs\cli.log`. |
 | `4` | No pair could be synced. | Same as 3. |
 | `5` | No video + subtitle pairs were found in the given paths. | Check the paths/names, or use `--pair`. |
 | `6` | Invalid command line: unknown option, file not found, unsupported file type. | The message says which. |
@@ -155,6 +156,50 @@ PROGRESS {"event":"item_done","item":1,"total":1,"status":"synced","output":"D:\
 | `item_done` | `item`, `total`, `status` (`synced`, `no_match`, `failed`, `cancelled`, as in the report) and `output` (the written file, or `null`). |
 
 Stages in order: `queued`, `reading_audio`, `listening` (nearly all of the time; `percent` is how much of the soundtrack has been heard, updated every 15 seconds of audio or so), `matching`, and rarely `waiting_for_file` (the existing result is open in another program). With several items, the next item's `reading_audio` starts while the current one is still `listening`. A transcript from the cache goes straight from `queued` to `matching`. New events and fields may be added later; ignore what you don't know.
+
+## `detect` (which language is spoken)
+
+`subsync-cli detect` tells a program such as the Jellyfin plugin which language a video's audio is in, for files whose audio track is tagged `und` (undetermined) or not tagged at all. It listens to a short sample instead of the whole video.
+
+```bat
+subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90] [--cpu] [--progress]
+```
+
+| Option | Meaning |
+|---|---|
+| `--track N` | Check audio track `N` (`1` = the first audio track). Default: the track `sync` would use, so the answer is about the audio a later sync listens to. |
+| `--seconds S` | Listen to at most `S` seconds of speech (5–600, default 90). |
+| `--cpu` | Don't use the NVIDIA GPU. |
+| `--progress` | `PROGRESS {json}` lines before the answer, as in `sync`: stage `reading_audio`, then `listening`, each with `percent`. |
+
+**What it does:** it reads 30-second pieces spread over the video (the first 5 % is skipped for intros and logos; videos under about 5½ minutes are read completely), keeps only the parts with voice, and stops once it has `--seconds` of speech, or after 10 pieces (5 minutes of audio). Whisper's language detection then runs on that speech; the answer is the language with the highest probability, averaged over the 30-second stretches of speech. Nothing is transcribed or matched.
+
+**Read-only:** nothing is created or changed next to the video, and the transcript cache and `settings.json` are not touched. Only `logs\cli.log` and `logs\worker.log` get lines.
+
+**Output (stdout):** exactly one JSON object on one line (after the `PROGRESS` lines with `--progress`). Setup or repair messages go to stderr.
+
+```json
+{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.4.0"}
+```
+
+| Field | Meaning |
+|---|---|
+| `video` | The full path. |
+| `track` | The audio track that was checked (`1` = first). |
+| `audio_tracks` | How many audio tracks the video has. |
+| `track_language_tag` | The track's language tag as stored in the file (`"und"`, `"eng"`, …), or `null` if it has none. |
+| `language` | The spoken language as Whisper's code, two letters for nearly every language (`"en"`, `"da"`, …; a few have three, such as `"haw"`), the same codes as `audio_language` in the sync report. `null` if no speech was found or the video can't be read. |
+| `probability` | How sure Whisper is, 0–1. `null` together with `language`. |
+| `speech_seconds` | Seconds of speech the answer is based on. |
+| `device` | `gpu` or `cpu`; `null` if the speech model wasn't needed (no speech found). If the GPU can't be used (for example it is full because `serve` is using it), `detect` switches to the CPU: slower, but it still answers, and `gpu_problem` says what happened. |
+| `model_load_seconds` | How long the speech model took to load. |
+| `seconds` | Time from SubSync's Python start to the answer (the launcher's self-check before it is not included). |
+| `reason` | Only when `language` is `null`: `"no speech found"`, `"no audio track"`, or why the video can't be read. |
+| `subsync_version` | The SubSync version. |
+
+New fields may be added later; ignore what you don't know. Music with singing counts as speech, so a video whose sample is mostly songs reports the language of the songs.
+
+**Exit codes:** `0` answered (including "no speech found"), `3` the video can't be read or has no audio track (a JSON object with `reason` is still printed), `6` invalid command line (no JSON; the message is on stderr), `7` setup/repair not possible right now, `10` unexpected error (no JSON). `detect` can run while the window, `sync` or `serve` use the same SubSync folder.
 
 ## `serve` (for programs)
 
@@ -334,6 +379,7 @@ python cli_e2e.py "whole folder"               # command line end-to-end, one ca
                                                # prints PASS and exits 0 when the case ends with its expected exit code
 python serve_e2e.py                            # `serve` end-to-end; exits non-zero if any check fails
 python serve_pipe_e2e.py                       # `serve` as a separate process with piped, open stdin (also on Windows)
+python detect_e2e.py && python test_detect.py  # `detect` end-to-end (stand-in for Whisper) and its unit tests
 python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
 

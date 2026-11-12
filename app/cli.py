@@ -17,7 +17,8 @@ import sys
 import time
 import traceback
 
-VERSION = "1.3.1"  # also in launcher/cli.go
+T_PROCESS = time.time()  # detect's "seconds" counts from here
+VERSION = "1.4.0"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video
@@ -26,6 +27,7 @@ EXIT_NOTHING = 5     # no video + subtitle pairs found
 EXIT_USAGE = 6       # invalid command line
 EXIT_STOPPED = 9     # stopped with Ctrl+C
 EXIT_INTERNAL = 10   # unexpected error - see logs\cli.log
+EXIT_UNREADABLE = 3  # detect only: the video can't be read or has no audio
 
 LOG = None
 
@@ -350,6 +352,100 @@ def write_report(path, items, skipped, code, seconds, speech=None):
         out(f"Could not write the report {path}: {e}")
 
 
+# ---------------------------------------------------------------- detect
+def detect(argv):
+    """subsync-cli detect VIDEO: which language is spoken (README-CLI.md, "detect"). Read-only.
+    Prints one JSON object on stdout (after PROGRESS lines with --progress)."""
+    t_start = T_PROCESS
+    p = Parser(prog="subsync-cli detect", add_help=False)
+    p.add_argument("video")
+    p.add_argument("--track", type=int, metavar="N")  # audio track number, 1 = first
+    p.add_argument("--seconds", type=float, default=90.0)
+    p.add_argument("--cpu", action="store_true")
+    p.add_argument("--progress", action="store_true")
+    args = p.parse_args(argv)
+    if not 5 <= args.seconds <= 600:
+        p.error("--seconds must be between 5 and 600")
+    from subsync.media import VIDEO_EXTS
+
+    video = os.path.abspath(args.video)
+    if not os.path.isfile(video):
+        p.error(f"video not found: {video}")
+    if os.path.splitext(video)[1].lower() not in VIDEO_EXTS:
+        p.error(f"not a supported video type: {video}")
+
+    # the speech-model process must never get the caller's pipes (lesson 13 in CLAUDE.md)
+    _, sys.stdout = _private_std_pipes()
+    from subsync import detect as det
+
+    def stage(code, frac=None):
+        if args.progress:
+            progress_line({"stage": code, "percent": None if frac is None else max(0, min(100, int(frac * 100)))})
+
+    answer = {"video": video, "track": None, "audio_tracks": None, "track_language_tag": None,
+              "language": None, "probability": None, "speech_seconds": 0.0, "device": None}
+
+    def finish(code, **fields):
+        answer.update(fields)
+        answer.update(seconds=round(time.time() - t_start, 1), subsync_version=VERSION)
+        log("detect: " + json.dumps(answer, ensure_ascii=False))
+        sys.stdout.write(json.dumps(answer, ensure_ascii=True, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+        return code
+
+    log(f"detect: {video} (track {args.track or 'auto'}, up to {args.seconds:g} s of speech, cpu {args.cpu})")
+    try:
+        import av
+        from subsync.media import pick_audio_stream
+
+        n, _, dur = pick_audio_stream(video)
+        with av.open(video) as c:
+            streams = list(c.streams.audio)
+            if args.track is not None:
+                if not 1 <= args.track <= len(streams):
+                    print(f"Error: --track {args.track}: this video has {len(streams)} audio track(s)", file=sys.__stderr__)
+                    log(f"usage error: --track {args.track} of {len(streams)}")
+                    return EXIT_USAGE
+                n = args.track - 1
+                st = streams[n]
+                if st.duration and st.time_base:
+                    dur = dur or float(st.duration * st.time_base)
+            tag = streams[n].metadata.get("language") or None
+        answer.update(track=n + 1, audio_tracks=len(streams), track_language_tag=tag)
+    except Exception as e:
+        return finish(EXIT_UNREADABLE, reason=f"can't read the video: {e}" if "no audio" not in str(e) else "no audio track")
+
+    # the speech model loads while the sample is read
+    detector = det.Detector(args.cpu, log)
+    try:
+        stage("reading_audio", 0.0)
+        t0 = time.time()
+        try:
+            pcs, speech_s, decoded = det.sample_speech(video, n, dur, args.seconds, lambda f: stage("reading_audio", f))
+        except Exception as e:
+            log(traceback.format_exc())
+            return finish(EXIT_UNREADABLE, reason=f"can't read the audio: {e}")
+        log(f"detect: read {decoded:.0f} s of audio, {speech_s:.1f} s with speech, in {time.time() - t0:.1f} s")
+        answer["speech_seconds"] = speech_s
+        if speech_s < det.MIN_SPEECH:
+            return finish(EXIT_OK, reason="no speech found")
+        stage("listening", 0.0)
+        t1 = time.time()
+        try:
+            results = detector.run(pcs, lambda f: stage("listening", f), path=video, track=n + 1)
+        except RuntimeError as e:
+            log(f"detect: failed: {e}")
+            print(f"Error: speech recognition failed: {e} (details in logs\\worker.log)", file=sys.__stderr__)
+            return EXIT_INTERNAL
+        lang, prob = det.combine(results)
+        log(f"detect: language check {time.time() - t1:.1f} s")
+        extra = {"gpu_problem": detector.gpu_problem} if detector.gpu_problem else {}
+        return finish(EXIT_OK, language=lang, probability=prob, device=detector.device,
+                      model_load_seconds=detector.load_s, **extra)
+    finally:
+        detector.stop()
+
+
 # ---------------------------------------------------------------- serve
 def _private_std_pipes():
     """Move the caller's stdin/stdout pipes off the standard handles, for `serve`. Returns the
@@ -604,6 +700,8 @@ if __name__ == "__main__":
     run = main
     if argv and argv[0] == "serve":
         run, argv = serve, argv[1:]
+    elif argv and argv[0] == "detect":
+        run, argv = detect, argv[1:]
     elif argv and argv[0] == "sync":
         argv = argv[1:]
     code = EXIT_INTERNAL
