@@ -2,8 +2,8 @@
 
 ## 1.4.1
 
-- **No more subtitles that flash by too fast to read.** When a subtitle's timing was moved, the next one could end up starting just after it, and the first one was then cut back to make room, sometimes to a few hundredths of a second. On screen that looked like a missing line. It happened to about 1–3 % of subtitles, most often sound descriptions such as "[door slams]" and short replies. No words were ever removed. Now every subtitle stays on screen for at least 0.7 s: a sound description that starts right next to its dialogue becomes one subtitle with it, and any other such line stays up together with the next one (players show both). Starts are not moved for this, so the timing accuracy is unchanged. The report counts these as `kept_visible`.
-- A subtitle row that is only a number (for example "1985") is no longer mistaken for the next subtitle's number in files without numbering.
+- **No more subtitles that flash by too fast to read.** When a subtitle's timing was moved, the next one could end up starting just after it, and the first one was then cut back to make room, sometimes to a few hundredths of a second. On screen that looked like a missing line. It happened to about 1–3 % of subtitles, most often sound descriptions such as "[door slams]" and short replies. No words were ever removed. Now such a subtitle gets the room before the next one if there is at least 0.5 s, and otherwise stays on screen for 0.7 s together with the next one (players show both; never three at once). With *Tidy up lines* on, a sound description that starts right next to its dialogue becomes one subtitle with it. Starts are not moved for this, so the timing accuracy is unchanged, and with *Tidy up lines* off every original subtitle is still exactly one subtitle in the result. The report counts these as `kept_visible`.
+- Reading subtitles: in a file without subtitle numbers, a row that is only a number (for example "1985") is no longer taken for a subtitle number and dropped.
 - New `tools/check_srt.py` lists subtitles in a result that are hard to see, and with the original also checks that every word is still there.
 
 ## 1.4.0

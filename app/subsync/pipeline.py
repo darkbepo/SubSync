@@ -83,8 +83,8 @@ def process(lines, words, lang, embed, tidy: bool, progress=lambda f: None) -> P
     if english and tidy:
         stats["word_timed"] = len(timed)
     # nothing may end up too short to be seen (it would look like a dropped line)
-    out, groups, vis = keep_visible(out)
-    sources = [[c for g in grp for c in sources[g]] for grp in groups]
+    out, groups, vis = keep_visible(out, join=tidy)  # Tidy up lines off: one result line per original line
+    sources = [list(dict.fromkeys(c for g in grp for c in sources[g])) for grp in groups]
     timed = {n for n, grp in enumerate(groups) if any(g in timed for g in grp)}
     stats["kept_visible"] = sum(vis.values())
     stats["subtitles_after"] = len(out)

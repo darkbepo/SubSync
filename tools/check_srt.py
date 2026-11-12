@@ -32,12 +32,15 @@ def read(path):
 def cues(path):
     rows = read(path).replace("\r\n", "\n").replace("\r", "\n").split("\n")
     marks = [(i, m) for i, r in enumerate(rows) if (m := TIME.search(r))]
+    # the same rule as SubSync (subtitles.parse_srt): a number right before a timing line is
+    # that block's number only in a file where most timing lines have one
+    numbered = sum(1 for i, _ in marks if i > 0 and rows[i - 1].strip().isdigit()) * 2 > len(marks) > 0
     out = []
     for k, (i, m) in enumerate(marks):
         body = rows[i + 1:(marks[k + 1][0] if k + 1 < len(marks) else len(rows))]
-        while body and not body[-1].strip():
+        if numbered and k + 1 < len(marks) and body and body[-1].strip().isdigit():
             body.pop()
-        if k + 1 < len(marks) and body and body[-1].strip().isdigit() and (len(body) == 1 or not body[-2].strip()):
+        while body and not body[-1].strip():
             body.pop()
         g = m.groups()
         t = lambda h, mi, s, ms: int(h) * 3600 + int(mi) * 60 + int(s) + int(ms.ljust(3, "0")[:3]) / 1000

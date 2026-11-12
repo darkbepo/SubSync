@@ -218,8 +218,7 @@ class ProcessTests(unittest.TestCase):
         bad, truth, asr, foreign = sim.make(seed=1)
         p = pipeline.process(bad, asr, "en", sim.fake_embed(foreign), tidy=False)
         self.assertTrue(p.res.ok, p.res.reason)
-        # only a sound description that would flash by joins its dialogue (1.4.1)
-        self.assertLessEqual(len(bad) - len(p.lines), 10)
+        self.assertEqual(len(p.lines), len(bad))  # Tidy off: one result line per original line
         start_of = {}
         for l, d in zip(p.lines, p.details):
             for c in d["from_cues"]:

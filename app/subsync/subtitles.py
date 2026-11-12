@@ -39,20 +39,17 @@ def _t(h, m, s, ms) -> float:
 def parse_srt(text: str) -> list[Line]:
     rows = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     marks = [(i, m) for i, r in enumerate(rows) if (m := _TIME.search(r))]
+    # a numbered file has a number on the row right before most (over half) of its timing lines; only
+    # then is that row the next block's number, otherwise it is text (a row like "1985")
+    numbered = sum(1 for i, _ in marks if i > 0 and rows[i - 1].strip().isdigit()) * 2 > len(marks) > 0
     out: list[Line] = []
     for k, (i, m) in enumerate(marks):
         stop = marks[k + 1][0] if k + 1 < len(marks) else len(rows)
         body = rows[i + 1:stop]
-        # drop the next block's index number and trailing blank lines. The number must follow
-        # a blank row or be the expected next number, so a text row that is only a number
-        # ("1985") in a file without numbering is kept
+        if numbered and k + 1 < len(marks) and body and body[-1].strip().isdigit():
+            body.pop()  # the next block's number
         while body and not body[-1].strip():
             body.pop()
-        if (k + 1 < len(marks) and body and body[-1].strip().isdigit()
-                and (len(body) == 1 or not body[-2].strip() or body[-1].strip() == str(k + 2))):
-            body.pop()
-            while body and not body[-1].strip():
-                body.pop()
         g = m.groups()
         start, end = _t(*g[:4]), _t(*g[4:])
         if end < start:

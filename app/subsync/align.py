@@ -396,29 +396,43 @@ def fix_endings(new: list[Line], orig: list[Line], speech_end: dict) -> tuple[in
 
 
 MIN_SHOW = 0.7     # no subtitle is shown for less than this (shorter looks like a missing line)
+MIN_FIT = 0.5      # with this much room before the next line, a short line fills it instead of overlapping
 JOIN_WITHIN = 0.3  # a sound description this close to its neighbour's start becomes one subtitle with it
 
 
-def keep_visible(lines: list[Line]) -> tuple[list[Line], list[list[int]], dict]:
+def keep_visible(lines: list[Line], join: bool = True) -> tuple[list[Line], list[list[int]], dict]:
     """Last pass before writing: make sure every subtitle stays on screen long enough to be
     seen. Moving starts can leave a subtitle only a few hundredths of a second before the next
-    one, which on screen looks as if the line was dropped. Nothing is ever removed or shortened.
-    A subtitle that is too short:
-      1. becomes one subtitle with its neighbour, if one of the two is a sound description,
-         they start within JOIN_WITHIN of each other and fit in two rows; it starts with the
-         dialogue (no dashes are invented: speaker changes can't be told);
-      2. otherwise stays on screen for MIN_SHOW together with the next one (players show both,
-         stacked), so both keep their exact starts.
+    one, which on screen looks as if the line was dropped. Starts are never moved, and nothing
+    is removed or shortened. A subtitle shorter than MIN_SHOW:
+      - with room before the next one, gets that room (up to MIN_SHOW; no overlap if at least
+        MIN_FIT fits, so the next line doesn't jump when this one disappears);
+      - with join (Tidy up lines on), a sound description and a neighbour that start within
+        JOIN_WITHIN of each other and fit in two rows become one subtitle, at the dialogue's
+        start (no dashes are invented: speaker changes can't be told);
+      - otherwise stays on screen for MIN_SHOW together with the next one (players show both,
+        stacked). Never three at once: if the one before is still showing then, this one gets
+        what room there is (or, with join, becomes one subtitle with the next one if they start
+        within JOIN_WITHIN and fit in two rows), and a last pass ends the earliest of three
+        overlapping ones just before the third starts.
     Returns the lines, which input lines each one came from, and counts."""
     out = [Line(l.start, l.end, l.text) for l in lines]
     groups = [[k] for k in range(len(out))]
-    stats = {"joined_sound": 0, "overlap": 0}
+    base = [l.end for l in out]  # ends before this pass: the last step never cuts below them
+    stats = {"joined": 0, "overlap": 0, "filled": 0}
 
     def rows(t):
         return len(t.split("\n"))
 
     def sound(t):
         return speech_text(t) is None
+
+    def merge(lo, start):
+        x, y = out[lo], out[lo + 1]
+        out[lo:lo + 2] = [Line(start, max(x.end, y.end, start + MIN_SHOW), x.text + "\n" + y.text)]
+        groups[lo:lo + 2] = [groups[lo] + groups[lo + 1]]
+        base[lo:lo + 2] = [max(base[lo], base[lo + 1])]
+        stats["joined"] += 1
 
     k = 0
     while k < len(out):
@@ -428,32 +442,47 @@ def keep_visible(lines: list[Line]) -> tuple[list[Line], list[list[int]], dict]:
             continue
         nxt = out[k + 1] if k + 1 < len(out) else None
         need = a.start + MIN_SHOW
-        if nxt is None or need <= nxt.start - GAP:  # room after it
+        if nxt is None or need <= nxt.start - GAP:
             a.end = max(a.end, need)
             k += 1
             continue
-        # 1. a sound description joins its neighbour, at the dialogue's own start
-        joined = False
-        for j in (k + 1, k - 1):
-            if not 0 <= j < len(out):
-                continue
-            b = out[j]
-            if (sound(a.text) or sound(b.text)) and rows(a.text) + rows(b.text) <= 2 and abs(b.start - a.start) <= JOIN_WITHIN:
-                first, second = (a, b) if j > k else (b, a)
-                talk = [x for x in (a, b) if not sound(x.text)]
-                start = talk[0].start if talk else min(a.start, b.start)
-                m = Line(start, max(a.end, b.end, start + MIN_SHOW), first.text + "\n" + second.text)
-                lo = min(j, k)
-                out[lo:lo + 2] = [m]
-                groups[lo:lo + 2] = [groups[lo] + groups[lo + 1]]
-                stats["joined_sound"] += 1
-                k = max(0, lo - 1)  # look again at the one before (it may now be too short itself)
-                joined = True
-                break
-        if joined:
+        if nxt.start - GAP - a.start >= MIN_FIT:
+            a.end = max(a.end, nxt.start - GAP)
+            stats["filled"] += 1
+            k += 1
             continue
-        # 2. shown together with the next one
+        if join:
+            done = False
+            for j in (k + 1, k - 1):
+                if not 0 <= j < len(out):
+                    continue
+                b = out[j]
+                if (sound(a.text) or sound(b.text)) and rows(a.text) + rows(b.text) <= 2 and abs(b.start - a.start) <= JOIN_WITHIN:
+                    talk = [x for x in (a, b) if not sound(x.text)]
+                    merge(min(j, k), talk[0].start if talk else min(a.start, b.start))
+                    k = max(0, min(j, k) - 1)  # look again at the one before (it may now be too short)
+                    done = True
+                    break
+            if done:
+                continue
+        prev = out[k - 1] if k else None
+        if prev is not None and prev.end > nxt.start + 1e-6:  # an overlap now would show three at once
+            if join and rows(a.text) + rows(nxt.text) <= 2 and nxt.start - a.start <= JOIN_WITHIN:
+                merge(k, a.start)
+                k = max(0, k - 1)
+                continue
+            a.end = max(a.end, nxt.start - GAP, a.start + 0.05)
+            k += 1
+            continue
         a.end = max(a.end, need)
         stats["overlap"] += 1
         k += 1
+    # never three on screen at once because of this pass (people talking over each other): the
+    # earliest gives back the time it got here, never more
+    for j in range(1, len(out)):
+        active = [i for i in range(max(0, j - 8), j) if out[i].end > out[j].start + 1e-6]
+        while len(active) >= 2:
+            i = active.pop(0)
+            if out[i].end > base[i] + 1e-9:
+                out[i].end = max(base[i], out[j].start - GAP, min(out[i].start + 0.05, out[j].start))
     return out, groups, stats
