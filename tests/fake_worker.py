@@ -19,6 +19,8 @@ def worker_main(req_q, res_q, cancel_ev, force_cpu, batch_hint):
     while True:
         job = req_q.get()
         if job is None: return
+        if os.environ.get("SUBSYNC_FAKE_GPU_CRASH") and not force_cpu:
+            os._exit(3)  # like a GPU driver crash mid-job: the engine restarts on the CPU and resends it
         res_q.put(("stage", job["id"], "Reading audio…"))
         t0 = time.time()
         a = decode(job["path"], job["audio_n"])

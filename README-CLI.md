@@ -95,7 +95,7 @@ Every error is printed with its reason, written to `logs\cli.log`, and included 
 
 ```json
 {
-  "subsync_version": "1.3.0",
+  "subsync_version": "1.3.1",
   "finished": "2026-11-08T20:19:27",
   "exit_code": 3,
   "seconds": 252.4,
@@ -176,12 +176,13 @@ The options apply to every item and work as in `sync`. `--overwrite` is needed t
 - `video` and `subtitle` are required. `output` is optional: the exact file to write (as with `--output`), otherwise `<video>.en.srt` with the usual naming rules.
 - SubSync may start on an item as soon as it is received, and writes its result when that item is finished. A program that keeps a backup of the subtitle should make it before sending the request.
 - Sending one item ahead of the one being worked on is enough for the overlap.
+- stdin may stay open between items: each `result` comes as soon as its item is finished. (On Windows, 1.3.0 only started working once stdin was closed; fixed in 1.3.1.)
 - **Close stdin** when there is nothing more to do: SubSync finishes every item it has received, then exits with `0`. To stop at once, end the process. Items not yet finished are then not written; a result already written stays.
 
 **Output (stdout):** one JSON object per line, flushed immediately.
 
 ```
-{"event":"ready","subsync_version":"1.3.0"}
+{"event":"ready","subsync_version":"1.3.1"}
 {"event":"stage","id":"ep-4711","stage":"queued","percent":null}
 {"event":"device","device":"gpu","name":"NVIDIA GeForce RTX 3050","model_load_seconds":6.2}
 {"event":"stage","id":"ep-4711","stage":"reading_audio","percent":null}
@@ -332,6 +333,7 @@ python cli_e2e.py "whole folder"               # command line end-to-end, one ca
                                                # "wrong subtitle (no match)", "progress + output", "gpu fails at start", ...);
                                                # prints PASS and exits 0 when the case ends with its expected exit code
 python serve_e2e.py                            # `serve` end-to-end; exits non-zero if any check fails
+python serve_pipe_e2e.py                       # `serve` as a separate process with piped, open stdin (also on Windows)
 python test_words.py && python test_reshape.py && python test_ui.py   # unit tests (word timing, re-cutting, settings)
 ```
 

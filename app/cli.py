@@ -17,7 +17,7 @@ import sys
 import time
 import traceback
 
-VERSION = "1.3.0"  # also in launcher/cli.go
+VERSION = "1.3.1"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video
@@ -351,6 +351,52 @@ def write_report(path, items, skipped, code, seconds, speech=None):
 
 
 # ---------------------------------------------------------------- serve
+def _private_std_pipes():
+    """Move the caller's stdin/stdout pipes off the standard handles, for `serve`. Returns the
+    (requests, events) text streams to use instead of sys.stdin / sys.stdout.
+
+    Why: on Windows every process started from here (the speech worker, at warm-up and on each
+    restart) gets this process's standard handles. Python's start-up in the child queries its stdin,
+    and on a synchronous pipe that call waits behind our own pending ReadFile, so the worker hung
+    until the caller closed stdin. After this, fd 0/1, the Win32 STD_INPUT/OUTPUT handles and
+    sys.stdin point at NUL, and only private, non-inheritable copies hold the caller's pipes.
+    Streams that aren't the real fd 0/1 (tests swap sys.stdin/sys.stdout) are used as they are."""
+    def real_fd(stream, fd):
+        try:
+            return stream is not None and stream.fileno() == fd
+        except (AttributeError, OSError, ValueError):
+            return False
+
+    requests, events = sys.stdin, sys.stdout
+    if real_fd(sys.stdin, 0):
+        # UTF-8 as documented (the launcher runs Python with -X utf8 anyway); a bad byte must not
+        # end the reader thread (that would hang serve), so it becomes U+FFFD
+        requests = open(os.dup(0), "r", encoding="utf-8", errors="replace", newline=None)
+        _point_std_at_nul(0, os.O_RDONLY, -10)  # STD_INPUT_HANDLE
+        sys.stdin = open(os.devnull, "r", encoding="utf-8")
+    if real_fd(sys.stdout, 1):
+        sys.stdout.flush()
+        # events are ASCII JSON; newline=None keeps the platform line ending, as sys.stdout had
+        events = open(os.dup(1), "w", encoding="utf-8", newline=None)
+        _point_std_at_nul(1, os.O_WRONLY, -11)  # STD_OUTPUT_HANDLE
+    return requests, events
+
+
+def _point_std_at_nul(fd, mode, std_handle):
+    nul = os.open(os.devnull, mode)
+    os.dup2(nul, fd)
+    os.close(nul)
+    if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+
+        from ctypes import wintypes
+
+        set_std = ctypes.windll.kernel32.SetStdHandle
+        set_std.argtypes, set_std.restype = (wintypes.DWORD, wintypes.HANDLE), wintypes.BOOL
+        set_std(std_handle & 0xFFFFFFFF, msvcrt.get_osfhandle(fd))
+
+
 def serve(argv):
     """subsync-cli serve: stay running for another program. Requests come in on stdin and
     events go out on stdout, one JSON object per line (README-CLI.md, "serve"). The models
@@ -370,6 +416,8 @@ def serve(argv):
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args(argv)
 
+    # before any worker is started (warm-up below, and every restart later)
+    requests, sys.stdout = _private_std_pipes()
     lock = threading.Lock()
 
     def emit(obj):
@@ -385,9 +433,13 @@ def serve(argv):
     engine.warm_up()
 
     def read_stdin():
-        for line in sys.stdin:
-            events.put(("line", line))
-        events.put(("eof",))
+        try:
+            for line in requests:
+                events.put(("line", line))
+        except (OSError, ValueError) as e:  # a broken pipe counts as closed, or serve would wait forever
+            log(f"serve: reading input failed: {e}")
+        finally:
+            events.put(("eof",))
 
     threading.Thread(target=read_stdin, daemon=True).start()
     log(f"serve: ready (suffix {settings['suffix']}, overwrite {args.overwrite}, tidy {settings['tidy']}, cpu {args.cpu})")

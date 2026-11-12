@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- **`serve` no longer hangs when the calling program keeps its input open (Windows).** In 1.3.0 an item stayed at "queued" until the program closed `serve`'s stdin: the speech worker got the request pipe as its own input and could not finish starting while `serve` was waiting for the next request on it. `serve` now reads requests from a private copy of the pipe, and every worker it starts (at the beginning and after a GPU-to-CPU fallback) gets an empty input and output instead.
+
 ## 1.3.0
 
 Faster starts; the results and the matching are unchanged.
