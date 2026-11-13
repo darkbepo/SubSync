@@ -18,7 +18,7 @@ import time
 import traceback
 
 T_PROCESS = time.time()  # detect's "seconds" counts from here
-VERSION = "1.5.0"  # also in launcher/cli.go
+VERSION = "1.5.1"  # also in launcher/cli.go
 
 EXIT_OK = 0          # every pair was synced
 EXIT_PARTIAL = 3     # some pairs synced, some failed or did not match their video

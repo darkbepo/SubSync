@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1
+
+- **Tidy up lines: a description of how a line is spoken stays with that line.** "(Quietly)", "(whispering)", "(in Spanish)" and the like at the end of a caption, right after a finished sentence, were joined to that sentence ("I'll call S.F.P.D for backup. (Quietly)" then "Jane!"). They now go with the line they describe ("I'll call S.F.P.D for backup." then "(Quietly) Jane!"). A sound that happens ("(sighs)", "[door slams]") still stays with its sentence.
+
 ## 1.5.0
 
 - **Danish subtitles.** SubSync now also syncs Danish subtitles, typically on English audio. It recognises them by their name (`.da`, `.dan`, `.danish`, `.dansk`) or, cautiously, by their text, and saves the result as `<video>.da.srt` (`.dan.srt` with the three-letter setting). English subtitles are handled exactly as before.
