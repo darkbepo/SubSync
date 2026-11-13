@@ -39,6 +39,30 @@ def _bare(t: Tok) -> str:
     return _TAG.sub("", t.text)
 
 
+# How the next words are spoken: "(Quietly)", "(sarcastically)", "(whispering)", "(in Spanish)", "(on phone)",
+# "(to Jane)". Unlike a sound that happens ("(sighs)", "[door slams]", "(phone ringing)"), it belongs to the line
+# after it. -ly words that aren't about the way of speaking (family, rally, July, names) and -ing words that are a
+# sound rather than a way of speaking (ringing, knocking) don't count.
+_LEAD_IN = re.compile(r"(?i)^[\[(]\s*(?:(?P<ly>[a-z]{3,}ly)|(?P<ing>[a-z]+ing)|(?:in|on|over|into|to|through)\s+[\w' .-]+)\s*[\])]$")
+_NOT_MANNER_LY = set("""family rally ally belly bully holy jelly italy july reply supply fly only early daily lily emily
+    kelly molly sally billy holly assembly anomaly monopoly butterfly firefly ugly silly lonely friendly lovely likely
+    lily jolly dolly polly bradly shelly ally italy apply comply""".split())
+_SPEAKING_ING = set("""whispering shouting yelling screaming laughing crying sobbing singing stammering stuttering muttering
+    mumbling chuckling giggling sighing groaning whimpering chanting mocking imitating reading continuing speaking
+    talking exclaiming murmuring snickering scoffing sniffling pleading teasing""".split())
+
+
+def _leads_in(text: str) -> bool:
+    m = _LEAD_IN.match(_TAG.sub("", text).strip())
+    if not m:
+        return False
+    if m.group("ly"):
+        return m.group("ly").lower() not in _NOT_MANNER_LY
+    if m.group("ing"):
+        return m.group("ing").lower() in _SPEAKING_ING
+    return True
+
+
 def _ends_sentence(t: Tok, nxt: Tok | None) -> bool:
     w = _bare(t)
     if not _END.search(w):
@@ -360,7 +384,17 @@ def reshape(orig, rough, toks: list[Tok], words, match) -> tuple[list, dict[int,
     for k, t in enumerate(stream):
         if t.kind != "tag":
             last_real[t.cue] = k
-    back = {id(stream[k]) for k in last_real.values() if stream[k].kind == "sound"}
+    # ... unless it says how the next line is spoken ("(Quietly)", "(whispering)", "(in Spanish)") and the words
+    # before it already end a sentence: then it leads into the next one
+    back = set()
+    for cue, k in last_real.items():
+        if stream[k].kind != "sound":
+            continue
+        prev = next((stream[q] for q in range(k - 1, -1, -1) if stream[q].kind != "tag"), None)
+        if (_leads_in(stream[k].text) and prev is not None and prev.cue == cue and prev.kind == "word"
+                and _END.search(_TAG.sub("", prev.text))):
+            continue
+        back.add(id(stream[k]))
 
     # hard boundaries: a cue kept on its own in between, a change of screen position, a long pause
     std = set(standalone)

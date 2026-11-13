@@ -97,6 +97,40 @@ def run(cues, spec=None):
     return R.reshape(cues, cues, toks, words, match)
 
 
+class LeadInTests(unittest.TestCase):
+    """A description of how the next line is spoken goes with that line, not the sentence before it (1.5.1)."""
+
+    def texts(self, cues):
+        return [l.text for l in run(cues)[0]]
+
+    def test_manner_at_the_end_of_a_caption_leads_into_the_next_line(self):
+        for first in ("I'll call S.F.P.D for backup. (Quietly)", "I'll call S.F.P.D for backup.\n(Quietly)"):
+            self.assertEqual(self.texts([Line(10, 12.5, first), Line(12.6, 13.5, "Jane!")]),
+                             ["I'll call S.F.P.D for backup.", "(Quietly) Jane!"])
+
+    def test_already_in_front_stays_in_front(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "I'll call S.F.P.D for backup."), Line(12.6, 13.5, "(Quietly) Jane!")]),
+                         ["I'll call S.F.P.D for backup.", "(Quietly) Jane!"])
+
+    def test_in_italics(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "<i>I'll call for backup. (Whispering)</i>"), Line(12.6, 13.5, "Jane!")]),
+                         ["<i>I'll call for backup.</i>", "<i>(Whispering)</i> Jane!"])
+
+    def test_a_sound_that_happens_stays_with_its_sentence(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "That's it. I'm done.\n(sighs)"), Line(13, 14.5, "Let's go home.")])[-2:],
+                         ["I'm done. (sighs)", "Let's go home."])
+
+    def test_inside_an_unfinished_sentence_nothing_moves(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "Well, I don't know (sarcastically)"), Line(12.6, 14, "what you mean.")]),
+                         ["Well, I don't know (sarcastically)\nwhat you mean."])
+
+    def test_which_descriptions_lead_in(self):
+        for t in ("(Quietly)", "(SARCASTICALLY)", "(whispering)", "(laughing)", "(in Spanish)", "[on phone]", "(to Jane)"):
+            self.assertTrue(R._leads_in(t), t)
+        for t in ("(sighs)", "[door slams]", "(laughs)", "(family)", "(Rally)", "(ringing)", "(knocking)", "(phone ringing)", "(July)"):
+            self.assertFalse(R._leads_in(t), t)
+
+
 class ReshapeTests(unittest.TestCase):
     def test_two_speakers_separate(self):
         cues = [Line(258.81, 263.0, "All right. Put out\nan amber alert and a b.O.L.O.\nAlready did. I've set up\n"
