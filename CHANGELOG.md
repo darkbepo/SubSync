@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2
+
+- **Tidy up lines: anything in brackets at the end of a caption now goes with the next line.** 1.5.1 did this only for a description of how a line is spoken ("(Quietly)"). A name or a sound in round or square brackets ("[Dexter]", "[Phone rings]", "(sighs)") at the end of a caption, right after a finished sentence, was still joined to that sentence. It now starts the next line ("[Phone rings] Hello?"), which is where captions usually put it. Inside an unfinished sentence nothing moves, and music notes stay with their song.
+
 ## 1.5.1
 
 - **Tidy up lines: a description of how a line is spoken stays with that line.** "(Quietly)", "(whispering)", "(in Spanish)" and the like at the end of a caption, right after a finished sentence, were joined to that sentence ("I'll call S.F.P.D for backup. (Quietly)" then "Jane!"). They now go with the line they describe ("I'll call S.F.P.D for backup." then "(Quietly) Jane!"). A sound that happens ("(sighs)", "[door slams]") still stays with its sentence.

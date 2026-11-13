@@ -194,7 +194,7 @@ subsync-cli detect "D:\Movies\Other Mommy (2026).mkv" [--track N] [--seconds 90]
 **Output (stdout):** exactly one JSON object on one line (after the `PROGRESS` lines with `--progress`). Setup or repair messages go to stderr.
 
 ```json
-{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.5.1"}
+{"video":"D:\\Movies\\Other Mommy (2026).mkv","track":1,"audio_tracks":1,"track_language_tag":"und","language":"en","probability":0.97,"speech_seconds":84.2,"device":"gpu","model_load_seconds":5.9,"seconds":11.4,"subsync_version":"1.5.2"}
 ```
 
 | Field | Meaning |

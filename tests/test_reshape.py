@@ -98,7 +98,8 @@ def run(cues, spec=None):
 
 
 class LeadInTests(unittest.TestCase):
-    """A description of how the next line is spoken goes with that line, not the sentence before it (1.5.1)."""
+    """A description of how the next line is spoken goes with that line, not the sentence before it (1.5.1);
+    since 1.5.2 so does anything else in brackets after a finished sentence."""
 
     def texts(self, cues):
         return [l.text for l in run(cues)[0]]
@@ -116,19 +117,31 @@ class LeadInTests(unittest.TestCase):
         self.assertEqual(self.texts([Line(10, 12.5, "<i>I'll call for backup. (Whispering)</i>"), Line(12.6, 13.5, "Jane!")]),
                          ["<i>I'll call for backup.</i>", "<i>(Whispering)</i> Jane!"])
 
-    def test_a_sound_that_happens_stays_with_its_sentence(self):
-        self.assertEqual(self.texts([Line(10, 12.5, "That's it. I'm done.\n(sighs)"), Line(13, 14.5, "Let's go home.")])[-2:],
-                         ["I'm done. (sighs)", "Let's go home."])
+    def test_names_and_sounds_in_brackets_lead_in_too(self):
+        # (1.5.2) any bracketed description, () or [], after a finished sentence goes to the next line
+        for end, nxt, want in (("[Dexter]", "Where are you?", "[Dexter] Where are you?"),
+                               ("(Dexter)", "Where are you?", "(Dexter) Where are you?"),
+                               ("[Phone rings]", "Hello?", "[Phone rings] Hello?"),
+                               ("(phone rings)", "Hello?", "(phone rings) Hello?"),
+                               ("(sighs)", "Let's go home.", "(sighs) Let's go home.")):
+            for sep in (" ", "\n"):
+                self.assertEqual(self.texts([Line(10, 12.5, "I'm done." + sep + end), Line(12.6, 14, nxt)]),
+                                 ["I'm done.", want], (end, sep))
+
+    def test_several_brackets_at_the_end_all_lead_in(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "I'm done. (sighs) [door closes]"), Line(12.6, 14, "Finally.")]),
+                         ["I'm done.", "(sighs) [door closes] Finally."])
+
+    def test_music_notes_stay_with_the_song(self):
+        self.assertEqual(self.texts([Line(10, 12.5, "♪ I love you. ♪"), Line(12.6, 14, "Stop singing.")]),
+                         ["♪ I love you. ♪", "Stop singing."])
+        for end in ("(sighs) ♪", "♪ (sighs)"):
+            self.assertEqual(self.texts([Line(10, 12.5, "♪ I love you. " + end), Line(12.6, 14, "Stop singing.")]),
+                             ["♪ I love you. " + end, "Stop singing."], end)
 
     def test_inside_an_unfinished_sentence_nothing_moves(self):
         self.assertEqual(self.texts([Line(10, 12.5, "Well, I don't know (sarcastically)"), Line(12.6, 14, "what you mean.")]),
                          ["Well, I don't know (sarcastically)\nwhat you mean."])
-
-    def test_which_descriptions_lead_in(self):
-        for t in ("(Quietly)", "(SARCASTICALLY)", "(whispering)", "(laughing)", "(in Spanish)", "[on phone]", "(to Jane)"):
-            self.assertTrue(R._leads_in(t), t)
-        for t in ("(sighs)", "[door slams]", "(laughs)", "(family)", "(Rally)", "(ringing)", "(knocking)", "(phone ringing)", "(July)"):
-            self.assertFalse(R._leads_in(t), t)
 
 
 class ReshapeTests(unittest.TestCase):
@@ -218,11 +231,13 @@ class ReshapeTests(unittest.TestCase):
                          Line(17.3, 20.7, "marshal gorman.\n(Chuckles) At ease, grace.")])
         self.assertTrue(any(l.text.startswith("(Chuckles) At ease, grace.") for l in new), [l.text for l in new])
 
-    def test_sound_at_cue_end_attaches_back(self):
+    def test_sound_at_cue_end_leads_into_the_next_line(self):
+        # until 1.5.1 it stayed with "afghanistan."; since 1.5.2 it starts the next line
         new, _, _ = run([Line(21.7, 23.2, "We're not invading\nafghanistan.\n(Lock click)"),
                          Line(23.2, 26.4, "Yeah, i know, but you know\nwhat the rules say. Thanks.")])
         cue = next(l for l in new if "afghanistan." in l.text)
-        self.assertIn("(Lock click)", cue.text)
+        self.assertNotIn("(Lock click)", cue.text)
+        self.assertTrue(any(l.text.startswith("(Lock click) Yeah") for l in new), [l.text for l in new])
 
     def test_sound_only_cues_kept(self):
         new, _, _ = run([Line(5.8, 7.5, "(Engine turns off)"), Line(15.9, 17.3, "Hey, you're early.")])
